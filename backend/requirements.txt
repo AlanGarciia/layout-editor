@@ -1,0 +1,5 @@
+fastapi
+uvicorn[standard]
+python-multipart
+psd-tools
+pillow
