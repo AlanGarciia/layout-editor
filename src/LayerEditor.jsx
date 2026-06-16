@@ -2,34 +2,29 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Transformer } from "react-konva";
 import {
   Upload, Eye, EyeOff, Trash2, Layers, ChevronDown, ChevronRight, Download,
-  ArrowUp, ArrowDown, Type, GripVertical, FileCode,
+  ArrowUp, ArrowDown, Type, GripVertical, FileCode, ImagePlus, Blend, Settings2,
 } from "lucide-react";
 
 /*
  * LayerEditor
  * -----------
- * Sube un SVG y lo separa en capas (cada <g> o elemento de primer nivel = una capa).
- * Tambien permite anadir capas de texto, editables in situ (doble clic sobre el
- * texto seleccionado abre un textarea superpuesto en su posicion).
+ * Editor de capas: separa SVG, anade PNG/JPG y texto, separa imagenes por color,
+ * y permite mover/escalar/rotar/reordenar capas.
  *
- * Seleccion: SOLO desde el panel de capas (lateral derecho). Hacer clic o
- * arrastrar en el canvas nunca cambia que capa esta seleccionada.
+ * Panel de propiedades (abajo del panel de capas, al seleccionar una capa):
+ *   - renombrar
+ *   - opacidad
+ *   - (texto) tamano de fuente y color
  *
- * Reordenar: con las flechas de cada fila o arrastrando las filas del panel.
- *
- * Exportar:
- *   - PSD: rasteriza cada capa a PNG y lo manda al backend (FastAPI + psd-tools),
- *     que compone el .psd. La rotacion NO se aplica en el PSD.
- *   - SVG: todo en el frontend. Cada capa se envuelve en un <g> con su transform.
- *     La rotacion SI se aplica, y el texto sale como texto editable.
+ * Seleccion: SOLO desde el panel de capas.
+ * Exportar: PSD (backend) y SVG (frontend). Ambos respetan opacidad.
  *
  * Dependencias: react-konva, konva, lucide-react
- *   npm i react-konva konva lucide-react
  */
 
 const API_URL = "http://localhost:8000";
 
-// --- Utilidades de SVG -------------------------------------------------------
+// --- Utilidades de SVG / imagen ----------------------------------------------
 
 function splitSvgIntoLayers(svgText) {
   const parser = new DOMParser();
@@ -81,6 +76,7 @@ function splitSvgIntoLayers(svgText) {
       type: "image",
       svg: single,
       visible: true,
+      opacity: 1,
       x: 0,
       y: 0,
       rotation: 0,
@@ -110,7 +106,33 @@ function svgToImage(svgString) {
   });
 }
 
-// Vuelca una capa a PNG base64. Maneja tanto imagenes (SVG) como texto.
+function fileToImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new window.Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("No se pudo cargar la imagen."));
+    };
+    img.src = url;
+  });
+}
+
+function imageToDataUrl(img, w, h) {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(w));
+  canvas.height = Math.max(1, Math.round(h));
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/png");
+}
+
+// Vuelca una capa a PNG base64. Maneja imagenes (SVG/PNG) y texto.
+// Aplica la opacidad de la capa al rasterizar (para el export PSD).
 function layerToPng(layer) {
   if (layer.type === "text") {
     const canvas = document.createElement("canvas");
@@ -124,6 +146,7 @@ function layerToPng(layer) {
     const h = Math.max(1, Math.ceil(lineH * lines.length));
     canvas.width = w;
     canvas.height = h;
+    ctx.globalAlpha = layer.opacity ?? 1;
     ctx.font = `${fontSize}px "DM Sans", sans-serif`;
     ctx.fillStyle = layer.fill;
     ctx.textBaseline = "top";
@@ -137,6 +160,7 @@ function layerToPng(layer) {
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
+  ctx.globalAlpha = layer.opacity ?? 1;
   ctx.drawImage(layer.img, 0, 0, w, h);
   return canvas.toDataURL("image/png");
 }
@@ -163,8 +187,9 @@ function CanvasLayer({ layer, isSelected, onChange, onEditText, hidden }) {
     rotation: layer.rotation,
     scaleX: layer.scaleX,
     scaleY: layer.scaleY,
+    opacity: layer.opacity ?? 1,
     draggable: isSelected,
-    listening: isSelected, // las no seleccionadas ignoran clics y arrastres
+    listening: isSelected,
     onDragEnd: (e) => onChange({ ...layer, x: e.target.x(), y: e.target.y() }),
     onTransformEnd: () => {
       const node = ref.current;
@@ -208,6 +233,67 @@ function CanvasLayer({ layer, isSelected, onChange, onEditText, hidden }) {
   );
 }
 
+// --- Panel de propiedades ----------------------------------------------------
+
+function PropertiesPanel({ layer, onChange }) {
+  if (!layer) {
+    return <div className="ed-props ed-props-empty">Selecciona una capa para ver sus propiedades.</div>;
+  }
+
+  const opacityPct = Math.round((layer.opacity ?? 1) * 100);
+
+  return (
+    <div className="ed-props">
+      <div className="ed-props-title">
+        <Settings2 size={14} /> Propiedades
+      </div>
+
+      <label className="ed-field">
+        <span>Nombre</span>
+        <input
+          type="text"
+          value={layer.name}
+          onChange={(e) => onChange({ ...layer, name: e.target.value })}
+        />
+      </label>
+
+      <label className="ed-field">
+        <span>Opacidad: {opacityPct}%</span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value={opacityPct}
+          onChange={(e) => onChange({ ...layer, opacity: Number(e.target.value) / 100 })}
+        />
+      </label>
+
+      {layer.type === "text" && (
+        <>
+          <label className="ed-field">
+            <span>Tamano: {layer.fontSize}px</span>
+            <input
+              type="range"
+              min="8"
+              max="200"
+              value={layer.fontSize}
+              onChange={(e) => onChange({ ...layer, fontSize: Number(e.target.value) })}
+            />
+          </label>
+          <label className="ed-field">
+            <span>Color</span>
+            <input
+              type="color"
+              value={layer.fill}
+              onChange={(e) => onChange({ ...layer, fill: e.target.value })}
+            />
+          </label>
+        </>
+      )}
+    </div>
+  );
+}
+
 // --- Componente principal ----------------------------------------------------
 
 export default function LayerEditor() {
@@ -220,8 +306,10 @@ export default function LayerEditor() {
   const [panelOpen, setPanelOpen] = useState(true);
   const [dragId, setDragId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
-  const [editing, setEditing] = useState(null); // { id, value, style } o null
+  const [editing, setEditing] = useState(null);
+  const [renamingId, setRenamingId] = useState(null); // capa cuyo nombre se edita en la lista
   const fileRef = useRef();
+  const imgRef = useRef();
   const stageRef = useRef();
   const textareaRef = useRef();
 
@@ -231,7 +319,7 @@ export default function LayerEditor() {
     setLoading(true);
     try {
       if (file.type !== "image/svg+xml" && !file.name.endsWith(".svg")) {
-        throw new Error("Por ahora solo se admiten archivos SVG.");
+        throw new Error("Ese boton es para SVG. Usa 'Anadir imagen' para PNG/JPG.");
       }
       const text = await file.text();
       const { layers: parsed, width, height } = splitSvgIntoLayers(text);
@@ -251,9 +339,129 @@ export default function LayerEditor() {
     }
   }, []);
 
+  const addImage = useCallback(async (file) => {
+    if (!file) return;
+    setError(null);
+    try {
+      const img = await fileToImage(file);
+
+      let cw = canvas.width;
+      let ch = canvas.height;
+      if (layers.length === 0) {
+        cw = img.width;
+        ch = img.height;
+        setCanvas({ width: cw, height: ch });
+      }
+
+      const id = `layer-img-${Date.now()}`;
+      const name = file.name.replace(/\.[^.]+$/, "");
+      setLayers((prev) => [
+        ...prev,
+        {
+          id,
+          name: name || "Imagen",
+          tag: "png",
+          type: "image",
+          svg: null,
+          img,
+          file,
+          visible: true,
+          opacity: 1,
+          x: Math.max(0, (cw - img.width) / 2),
+          y: Math.max(0, (ch - img.height) / 2),
+          rotation: 0,
+          scaleX: 1,
+          scaleY: 1,
+        },
+      ]);
+      setSelectedId(id);
+    } catch (e) {
+      setError(e.message);
+    }
+  }, [canvas.width, canvas.height, layers.length]);
+
+  const splitByColor = async (layer) => {
+    if (!layer || !layer.file) {
+      setError("Esta capa no se puede separar (sin archivo original).");
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    try {
+      const form = new FormData();
+      form.append("file", layer.file);
+      form.append("n_colors", "12");
+      form.append("merge_dist", "50");
+      form.append("min_percent", "1.5");
+
+      const res = await fetch(`${API_URL}/layers/split-color`, {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Error ${res.status}`);
+      }
+      const data = await res.json();
+      if (!data.layers || data.layers.length === 0) {
+        throw new Error("El backend no devolvio capas.");
+      }
+
+      const stamp = Date.now();
+      const loadImg = (dataUrl) =>
+        new Promise((resolve, reject) => {
+          const im = new window.Image();
+          im.onload = () => resolve(im);
+          im.onerror = () => reject(new Error("Imagen de capa invalida"));
+          im.src = dataUrl;
+        });
+
+      const newLayers = [];
+      for (let i = 0; i < data.layers.length; i++) {
+        const cl = data.layers[i];
+        const img = await loadImg(cl.png);
+        newLayers.push({
+          id: `layer-color-${stamp}-${i}`,
+          name: cl.name,
+          tag: "color",
+          type: "image",
+          svg: null,
+          img,
+          file: null,
+          visible: true,
+          opacity: 1,
+          x: 0,
+          y: 0,
+          rotation: 0,
+          scaleX: 1,
+          scaleY: 1,
+        });
+      }
+
+      setLayers((prev) => {
+        const idx = prev.findIndex((l) => l.id === layer.id);
+        if (idx < 0) return [...prev, ...newLayers];
+        const next = [...prev];
+        next.splice(idx, 1, ...newLayers);
+        return next;
+      });
+      setSelectedId(newLayers[0].id);
+      setDragId(null);
+      setDragOverId(null);
+    } catch (e) {
+      setError(`No se pudo separar: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const onDrop = (e) => {
     e.preventDefault();
-    handleFile(e.dataTransfer.files?.[0]);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    const isSvg = file.type === "image/svg+xml" || file.name.endsWith(".svg");
+    if (isSvg) handleFile(file);
+    else addImage(file);
   };
 
   const updateLayer = (updated) =>
@@ -269,7 +477,6 @@ export default function LayerEditor() {
     if (selectedId === id) setSelectedId(null);
   };
 
-  // Mueve una capa una posicion arriba/abajo en el orden de pintado.
   const moveLayer = (id, dir) => {
     setLayers((prev) => {
       const i = prev.findIndex((l) => l.id === id);
@@ -281,7 +488,6 @@ export default function LayerEditor() {
     });
   };
 
-  // Reordena arrastrando: coloca "fromId" en la posicion de "toId".
   const reorderLayers = (fromId, toId) => {
     if (fromId === toId) return;
     setLayers((prev) => {
@@ -311,6 +517,7 @@ export default function LayerEditor() {
       scaleX: 1,
       scaleY: 1,
       visible: true,
+      opacity: 1,
       img: null,
     };
     setLayers((prev) => [...prev, newLayer]);
@@ -318,7 +525,6 @@ export default function LayerEditor() {
     setTimeout(() => startEditing(newLayer), 0);
   };
 
-  // Abre el textarea superpuesto sobre el nodo de texto
   const startEditing = (layer) => {
     const scale = currentScale();
     setEditing({
@@ -350,9 +556,6 @@ export default function LayerEditor() {
 
   const cancelEditing = () => setEditing(null);
 
-  // Enfoca el textarea SOLO al abrirlo (depende del id, no del objeto entero;
-  // si dependiera de `editing`, se re-seleccionaria todo en cada tecla y solo
-  // quedaria la ultima letra).
   useEffect(() => {
     if (editing && textareaRef.current) {
       const ta = textareaRef.current;
@@ -362,7 +565,6 @@ export default function LayerEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing?.id]);
 
-  // Exporta a PSD via backend (rasteriza cada capa a PNG)
   const exportPsd = async () => {
     if (layers.length === 0) return;
     setError(null);
@@ -405,8 +607,6 @@ export default function LayerEditor() {
     }
   };
 
-  // Exporta a SVG: cada capa se envuelve en un <g> con su transformacion.
-  // Las capas de imagen reusan su SVG original; las de texto generan un <text>.
   const exportSvg = () => {
     if (layers.length === 0) return;
 
@@ -416,6 +616,7 @@ export default function LayerEditor() {
     const parts = layers
       .filter((l) => l.visible)
       .map((l) => {
+        const op = (l.opacity ?? 1) < 1 ? ` opacity="${l.opacity}"` : "";
         const t = `translate(${l.x} ${l.y}) rotate(${l.rotation}) scale(${l.scaleX} ${l.scaleY})`;
 
         if (l.type === "text") {
@@ -425,16 +626,26 @@ export default function LayerEditor() {
               `<tspan x="0" dy="${i === 0 ? l.fontSize : l.fontSize * 1.3}">${esc(ln)}</tspan>`
             )
             .join("");
-          return `<g transform="${t}"><text font-family="DM Sans, sans-serif" font-size="${l.fontSize}" fill="${l.fill}">${tspans}</text></g>`;
+          return `<g transform="${t}"${op}><text font-family="DM Sans, sans-serif" font-size="${l.fontSize}" fill="${l.fill}">${tspans}</text></g>`;
         }
 
-        // capa de imagen: extrae el contenido interno del SVG original
-        const inner = l.svg.replace(/^<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "");
-        return `<g transform="${t}">${inner}</g>`;
+        if (l.svg) {
+          const inner = l.svg.replace(/^<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "");
+          return `<g transform="${t}"${op}>${inner}</g>`;
+        }
+
+        if (l.img) {
+          const w = l.img.width;
+          const h = l.img.height;
+          const href = imageToDataUrl(l.img, w, h);
+          return `<g transform="${t}"${op}><image width="${w}" height="${h}" href="${href}"/></g>`;
+        }
+
+        return "";
       })
       .join("\n  ");
 
-    const doc = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}" viewBox="0 0 ${canvas.width} ${canvas.height}">
+    const doc = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${canvas.width}" height="${canvas.height}" viewBox="0 0 ${canvas.width} ${canvas.height}">
   ${parts}
 </svg>`;
 
@@ -454,6 +665,8 @@ export default function LayerEditor() {
 
   const hasContent = layers.length > 0;
   const editingLayer = editing ? layers.find((l) => l.id === editing.id) : null;
+  const selectedLayer = layers.find((l) => l.id === selectedId);
+  const canSplit = selectedLayer && selectedLayer.type === "image" && selectedLayer.file;
 
   return (
     <div className="ed-root">
@@ -467,9 +680,17 @@ export default function LayerEditor() {
         <button className="ed-btn" onClick={() => fileRef.current?.click()}>
           <Upload size={15} /> Subir SVG
         </button>
+        <button className="ed-btn ed-btn-ghost" onClick={() => imgRef.current?.click()}>
+          <ImagePlus size={15} /> Anadir imagen
+        </button>
         <button className="ed-btn ed-btn-ghost" onClick={addText}>
           <Type size={15} /> Anadir texto
         </button>
+        {canSplit && (
+          <button className="ed-btn ed-btn-ghost" onClick={() => splitByColor(selectedLayer)}>
+            <Blend size={15} /> Separar por color
+          </button>
+        )}
         <button
           className="ed-btn ed-btn-ghost"
           onClick={exportSvg}
@@ -491,20 +712,26 @@ export default function LayerEditor() {
           hidden
           onChange={(e) => handleFile(e.target.files?.[0])}
         />
+        <input
+          ref={imgRef}
+          type="file"
+          accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+          hidden
+          onChange={(e) => addImage(e.target.files?.[0])}
+        />
       </header>
 
       <div className="ed-body">
-        {/* Lienzo */}
         <main className="ed-canvas-wrap" onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
           {!hasContent ? (
             <div className="ed-empty">
               {loading ? (
-                <p>Separando capas...</p>
+                <p>Procesando...</p>
               ) : (
                 <>
                   <Upload size={32} strokeWidth={1.5} />
-                  <p>Arrastra un SVG aqui o usa "Subir SVG".</p>
-                  <span>Cada grupo del SVG se convierte en una capa editable. Selecciona capas en el panel derecho.</span>
+                  <p>Arrastra un SVG o una imagen aqui.</p>
+                  <span>El SVG se separa en capas; los PNG/JPG entran como una capa que puedes separar por color. Tambien puedes anadir texto.</span>
                 </>
               )}
               {error && <p className="ed-error">{error}</p>}
@@ -537,7 +764,6 @@ export default function LayerEditor() {
                   </Layer>
                 </Stage>
 
-                {/* Textarea superpuesto para editar texto in situ */}
                 {editing && editingLayer && (
                   <textarea
                     ref={textareaRef}
@@ -565,90 +791,125 @@ export default function LayerEditor() {
           )}
         </main>
 
-        {/* Panel de capas */}
         <aside className={`ed-panel ${panelOpen ? "" : "ed-panel-collapsed"}`}>
           <button className="ed-panel-head" onClick={() => setPanelOpen((o) => !o)}>
             {panelOpen ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
             <span>Capas {layers.length > 0 && `(${layers.length})`}</span>
           </button>
           {panelOpen && (
-            <ul className="ed-layer-list">
-              {layers.length === 0 && <li className="ed-layer-none">Sin capas</li>}
-              {[...layers].reverse().map((l) => (
-                <li
-                  key={l.id}
-                  draggable
-                  className={`ed-layer ${l.id === selectedId ? "ed-layer-sel" : ""} ${
-                    l.id === dragOverId && dragId !== l.id ? "ed-layer-over" : ""
-                  } ${l.id === dragId ? "ed-layer-dragging" : ""}`}
-                  onClick={() => setSelectedId(l.id)}
-                  onDragStart={(e) => {
-                    setDragId(l.id);
-                    e.dataTransfer.effectAllowed = "move";
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    if (l.id !== dragOverId) setDragOverId(l.id);
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    if (dragId) reorderLayers(dragId, l.id);
-                    setDragId(null);
-                    setDragOverId(null);
-                  }}
-                  onDragEnd={() => {
-                    setDragId(null);
-                    setDragOverId(null);
-                  }}
-                >
-                  <span className="ed-grip" title="Arrastra para reordenar">
-                    <GripVertical size={14} />
-                  </span>
-                  <button
-                    className="ed-icon"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleVisible(l.id);
+            <>
+              <ul className="ed-layer-list">
+                {layers.length === 0 && <li className="ed-layer-none">Sin capas</li>}
+                {[...layers].reverse().map((l) => (
+                  <li
+                    key={l.id}
+                    draggable={renamingId !== l.id}
+                    className={`ed-layer ${l.id === selectedId ? "ed-layer-sel" : ""} ${
+                      l.id === dragOverId && dragId !== l.id ? "ed-layer-over" : ""
+                    } ${l.id === dragId ? "ed-layer-dragging" : ""}`}
+                    onClick={() => setSelectedId(l.id)}
+                    onDragStart={(e) => {
+                      setDragId(l.id);
+                      e.dataTransfer.effectAllowed = "move";
                     }}
-                    title={l.visible ? "Ocultar" : "Mostrar"}
-                  >
-                    {l.visible ? <Eye size={15} /> : <EyeOff size={15} />}
-                  </button>
-                  <span className="ed-layer-name">{l.name}</span>
-                  <span className="ed-layer-tag">{l.tag}</span>
-                  <button
-                    className="ed-icon"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      moveLayer(l.id, 1);
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      if (l.id !== dragOverId) setDragOverId(l.id);
                     }}
-                    title="Subir"
-                  >
-                    <ArrowUp size={14} />
-                  </button>
-                  <button
-                    className="ed-icon"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      moveLayer(l.id, -1);
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (dragId) reorderLayers(dragId, l.id);
+                      setDragId(null);
+                      setDragOverId(null);
                     }}
-                    title="Bajar"
-                  >
-                    <ArrowDown size={14} />
-                  </button>
-                  <button
-                    className="ed-icon ed-icon-del"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeLayer(l.id);
+                    onDragEnd={() => {
+                      setDragId(null);
+                      setDragOverId(null);
                     }}
-                    title="Eliminar"
                   >
-                    <Trash2 size={14} />
-                  </button>
-                </li>
-              ))}
-            </ul>
+                    <span className="ed-grip" title="Arrastra para reordenar">
+                      <GripVertical size={14} />
+                    </span>
+                    <button
+                      className="ed-icon"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleVisible(l.id);
+                      }}
+                      title={l.visible ? "Ocultar" : "Mostrar"}
+                    >
+                      {l.visible ? <Eye size={15} /> : <EyeOff size={15} />}
+                    </button>
+
+                    {renamingId === l.id ? (
+                      <input
+                        className="ed-rename"
+                        autoFocus
+                        defaultValue={l.name}
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={(e) => {
+                          updateLayer({ ...l, name: e.target.value || l.name });
+                          setRenamingId(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            updateLayer({ ...l, name: e.target.value || l.name });
+                            setRenamingId(null);
+                          } else if (e.key === "Escape") {
+                            setRenamingId(null);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <span
+                        className="ed-layer-name"
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          setRenamingId(l.id);
+                        }}
+                        title="Doble clic para renombrar"
+                      >
+                        {l.name}
+                      </span>
+                    )}
+
+                    <span className="ed-layer-tag">{l.tag}</span>
+                    <button
+                      className="ed-icon"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveLayer(l.id, 1);
+                      }}
+                      title="Subir"
+                    >
+                      <ArrowUp size={14} />
+                    </button>
+                    <button
+                      className="ed-icon"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveLayer(l.id, -1);
+                      }}
+                      title="Bajar"
+                    >
+                      <ArrowDown size={14} />
+                    </button>
+                    <button
+                      className="ed-icon ed-icon-del"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeLayer(l.id);
+                      }}
+                      title="Eliminar"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+
+              <PropertiesPanel layer={selectedLayer} onChange={updateLayer} />
+            </>
           )}
         </aside>
       </div>
@@ -684,20 +945,20 @@ const styles = `
       linear-gradient(-45deg,transparent 75%,#1a1c22 75%) -8px 0/16px 16px,
       var(--bg); }
   .ed-stage-frame { box-shadow:0 0 0 1px var(--line),0 8px 30px rgba(0,0,0,.4);
-    background:#fff; }
+    background:#fff; overflow:hidden; position:relative; }
   .ed-text-edit { position:absolute; margin:0; padding:4px; border:1px dashed var(--accent);
     background:rgba(255,255,255,.85); outline:none; resize:none; overflow:hidden;
     font-family:'DM Sans',sans-serif; line-height:1.3; white-space:pre;
     min-width:40px; border-radius:2px; }
   .ed-empty { display:flex; flex-direction:column; align-items:center; gap:8px;
-    color:var(--muted); text-align:center; max-width:340px; }
+    color:var(--muted); text-align:center; max-width:360px; }
   .ed-empty p { margin:6px 0 0; color:var(--txt); font-weight:500; }
   .ed-empty span { font-size:13px; }
   .ed-error { color:var(--danger)!important; font-weight:500; }
   .ed-error-float { position:absolute; bottom:12px; left:50%;
     transform:translateX(-50%); background:#2a1c1e; padding:8px 14px;
     border-radius:8px; font-size:13px; box-shadow:0 0 0 1px var(--danger); }
-  .ed-panel { width:280px; border-left:1px solid var(--line); background:var(--panel);
+  .ed-panel { width:300px; border-left:1px solid var(--line); background:var(--panel);
     display:flex; flex-direction:column; transition:width .15s; }
   .ed-panel-collapsed { width:120px; }
   .ed-panel-head { display:flex; align-items:center; gap:6px; width:100%;
@@ -713,6 +974,9 @@ const styles = `
   .ed-layer-dragging { opacity:.4; }
   .ed-layer-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
     min-width:0; }
+  .ed-rename { flex:1; min-width:0; background:#0f1116; border:1px solid var(--accent);
+    color:var(--txt); border-radius:4px; padding:3px 6px; font-size:13px;
+    font-family:inherit; outline:none; }
   .ed-layer-tag { font-size:11px; color:var(--muted); font-family:'JetBrains Mono',monospace;
     background:#0f1116; padding:2px 6px; border-radius:4px; }
   .ed-grip { display:flex; color:var(--muted); cursor:grab; flex-shrink:0; }
@@ -721,4 +985,18 @@ const styles = `
     display:flex; padding:2px; border-radius:4px; flex-shrink:0; }
   .ed-icon:hover { color:var(--txt); }
   .ed-icon-del:hover { color:var(--danger); }
+  .ed-props { border-top:1px solid var(--line); padding:12px 14px;
+    display:flex; flex-direction:column; gap:12px; }
+  .ed-props-empty { color:var(--muted); font-size:13px; }
+  .ed-props-title { display:flex; align-items:center; gap:6px; font-weight:600;
+    font-size:13px; color:var(--accent); }
+  .ed-field { display:flex; flex-direction:column; gap:5px; font-size:12.5px;
+    color:var(--muted); }
+  .ed-field input[type=text] { background:#0f1116; border:1px solid var(--line);
+    color:var(--txt); border-radius:6px; padding:7px 9px; font-size:13px;
+    font-family:inherit; outline:none; }
+  .ed-field input[type=text]:focus { border-color:var(--accent); }
+  .ed-field input[type=range] { width:100%; accent-color:var(--accent); }
+  .ed-field input[type=color] { width:44px; height:30px; padding:0; border:1px solid var(--line);
+    border-radius:6px; background:none; cursor:pointer; }
 `;

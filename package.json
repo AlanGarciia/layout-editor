@@ -14,7 +14,9 @@
     "lucide-react": "^1.18.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-konva": "^19.2.5"
+    "react-konva": "^19.2.5",
+    "react-router-dom": "^7.17.0",
+    "svgo": "^4.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
