@@ -22,9 +22,11 @@ export function formatSize(bytes: number): string {
 export default function FileCard({
   item,
   onDownload,
+  t,
 }: {
   item: FileItem;
   onDownload: (item: FileItem) => void;
+  t: (k: string) => string;
 }) {
   const isSvg = item.file.name.toLowerCase().endsWith(".svg");
   const TypeIcon = isSvg ? FileCode : FileImage;
@@ -44,11 +46,11 @@ export default function FileCard({
         <div className="cp-card-name">{item.file.name}</div>
 
         {item.status === "pending" && (
-          <div className="cp-card-meta">En cola - {formatSize(item.file.size)}</div>
+          <div className="cp-card-meta">{t("queued")} - {formatSize(item.file.size)}</div>
         )}
         {item.status === "working" && (
           <div className="cp-card-meta cp-working">
-            <Loader2 size={13} className="cp-spin" /> Optimizando...
+            <Loader2 size={13} className="cp-spin" /> {t("optimizing")}
           </div>
         )}
         {item.status === "done" && (
@@ -56,7 +58,7 @@ export default function FileCard({
             {formatSize(item.originalSize)} -&gt; {formatSize(item.newSize)}
             {saving !== null && (
               <span className={`cp-saving ${saving > 0 ? "cp-saving-good" : "cp-saving-none"}`}>
-                {saving > 0 ? `-${saving}%` : "sin cambio"}
+                {saving > 0 ? `-${saving}%` : t("noChange")}
               </span>
             )}
           </div>
@@ -72,7 +74,7 @@ export default function FileCard({
         {item.status === "done" && (
           <>
             <CheckCircle2 size={16} className="cp-check" />
-            <button className="cp-dl" onClick={() => onDownload(item)} title="Descargar">
+            <button className="cp-dl" onClick={() => onDownload(item)} title={t("download")}>
               <Download size={16} />
             </button>
           </>

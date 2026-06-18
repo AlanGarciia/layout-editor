@@ -3,17 +3,19 @@
 import { Globe, Share2, Printer } from "lucide-react";
 
 const PRESETS = [
-  { id: "web", label: "Web", desc: "max 1920px, WebP, calidad 78", icon: Globe },
-  { id: "social", label: "Redes", desc: "max 1080px, JPG, calidad 82", icon: Share2 },
-  { id: "print", label: "Impresion", desc: "tamano original, calidad 88", icon: Printer },
+  { id: "web", labelKey: "presetWeb", descKey: "presetWebDesc", icon: Globe },
+  { id: "social", labelKey: "presetSocial", descKey: "presetSocialDesc", icon: Share2 },
+  { id: "print", labelKey: "presetPrint", descKey: "presetPrintDesc", icon: Printer },
 ];
 
 export default function PresetSelector({
   value,
   onChange,
+  t,
 }: {
   value: string;
   onChange: (v: string) => void;
+  t: (k: string) => string;
 }) {
   return (
     <div className="cp-presets">
@@ -26,8 +28,8 @@ export default function PresetSelector({
             onClick={() => onChange(p.id)}
           >
             <Icon size={20} strokeWidth={2} />
-            <span className="cp-preset-label">{p.label}</span>
-            <span className="cp-preset-desc">{p.desc}</span>
+            <span className="cp-preset-label">{t(p.labelKey)}</span>
+            <span className="cp-preset-desc">{t(p.descKey)}</span>
           </button>
         );
       })}

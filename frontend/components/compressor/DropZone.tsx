@@ -5,7 +5,13 @@ import { UploadCloud } from "lucide-react";
 
 const ACCEPT = ".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml";
 
-export default function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
+export default function DropZone({
+  onFiles,
+  t,
+}: {
+  onFiles: (files: File[]) => void;
+  t: (k: string) => string;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFiles = (fileList: FileList | null) => {
@@ -24,8 +30,8 @@ export default function DropZone({ onFiles }: { onFiles: (files: File[]) => void
       onDragOver={(e) => e.preventDefault()}
     >
       <UploadCloud size={36} strokeWidth={1.5} />
-      <p>Arrastra imagenes aqui o haz clic para elegir</p>
-      <span>PNG, JPG, WebP y SVG. Puedes subir varias a la vez.</span>
+      <p>{t("dropHint")}</p>
+      <span>{t("dropFormats")}</span>
       <input
         ref={inputRef}
         type="file"

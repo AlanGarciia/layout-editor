@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import { Sparkles, Play, Trash2, DownloadCloud } from "lucide-react";
 import DropZone from "./DropZone";
 import FileCard, { formatSize, type FileItem } from "./FileCard";
@@ -9,22 +10,15 @@ import { optimizeImage } from "./api";
 
 /*
  * Compressor / Optimizer (Next, cliente).
- * PNG/JPG/WebP -> backend (Pillow + pngquant). SVG -> SVGO en el navegador.
+ * PNG/JPG/WebP -> backend (Pillow + pngquant). SVG -> backend (scour).
  */
 
-const SVGO_CONFIG = {
-  multipass: true,
-  plugins: [
-    {
-      name: "preset-default" as const,
-      params: { overrides: { removeViewBox: false } },
-    },
-  ],
-};
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 let idSeq = 0;
 
 export default function Compressor() {
+  const t = useTranslations("optimizer");
   const [items, setItems] = useState<FileItem[]>([]);
   const [preset, setPreset] = useState("web");
   const [processing, setProcessing] = useState(false);
@@ -47,9 +41,18 @@ export default function Compressor() {
     const isSvg = item.file.name.toLowerCase().endsWith(".svg");
 
     if (isSvg) {
-      const text = await item.file.text();
-      const result = svgoOptimize(text, SVGO_CONFIG);
-      const optimized = result.data;
+      // SVG -> backend (scour)
+      const form = new FormData();
+      form.append("file", item.file);
+      const res = await fetch(`${API_URL}/optimize/svg`, {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Error ${res.status}`);
+      }
+      const optimized = await res.text();
       const blob = new Blob([optimized], { type: "image/svg+xml" });
       const base = item.file.name.replace(/\.svg$/i, "");
       return {
@@ -95,7 +98,7 @@ export default function Compressor() {
     a.href = url;
     a.download = item.outName || "resultado";
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
   };
 
   const downloadAll = () => {
@@ -118,39 +121,39 @@ export default function Compressor() {
 
       <div className="cp-head">
         <Sparkles size={18} strokeWidth={2.5} />
-        <h2>Design Compressor + Optimizer</h2>
+        <h2>{t("title")}</h2>
       </div>
 
       <p className="cp-intro">
-        Sube imagenes o SVG y obten versiones optimizadas para web, redes o impresion.
+        {t("intro")}
       </p>
 
-      <PresetSelector value={preset} onChange={setPreset} />
-      <DropZone onFiles={addFiles} />
+      <PresetSelector value={preset} onChange={setPreset} t={t} />
+      <DropZone onFiles={addFiles} t={t} />
 
       {hasItems && (
         <>
           <div className="cp-toolbar">
             <button className="cp-btn" onClick={runAll} disabled={processing || pendingCount === 0}>
               <Play size={15} />
-              {processing ? "Procesando..." : `Optimizar ${pendingCount > 0 ? `(${pendingCount})` : "todo"}`}
+              {processing ? t("optimizing") : `${t("optimize")}${pendingCount > 0 ? ` (${pendingCount})` : ""}`}
             </button>
             <button className="cp-btn cp-btn-ghost" onClick={downloadAll} disabled={doneCount === 0}>
-              <DownloadCloud size={15} /> Descargar todo ({doneCount})
+              <DownloadCloud size={15} /> {t("downloadAll")} ({doneCount})
             </button>
             <button className="cp-btn cp-btn-ghost cp-btn-danger" onClick={clearAll}>
-              <Trash2 size={15} /> Limpiar
+              <Trash2 size={15} /> {t("clear")}
             </button>
             {doneCount > 0 && totalSaving > 0 && (
               <span className="cp-total">
-                Ahorro total: <strong>-{totalSaving}%</strong> ({formatSize(totalOrig)} -&gt; {formatSize(totalNew)})
+                {t("totalSaving")}: <strong>-{totalSaving}%</strong> ({formatSize(totalOrig)} -&gt; {formatSize(totalNew)})
               </span>
             )}
           </div>
 
           <div className="cp-list">
             {items.map((item) => (
-              <FileCard key={item.id} item={item} onDownload={download} />
+              <FileCard key={item.id} item={item} onDownload={download} t={t} />
             ))}
           </div>
         </>

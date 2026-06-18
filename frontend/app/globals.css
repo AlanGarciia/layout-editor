@@ -226,3 +226,31 @@ html, body {
   color: #4d9d84;
   background: #2a3a35;
 }
+/* ====== Selector de idioma en el nav (anadir al final de globals.css) ====== */
+.lf-nav-locale {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  background: #15171c;
+  border: 1px solid #2a2e38;
+  border-radius: 8px;
+  padding: 2px;
+}
+.lf-locale-btn {
+  background: transparent;
+  border: 0;
+  color: #8b90a0;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.lf-locale-btn:hover {
+  color: #e6e8ec;
+}
+.lf-locale-active {
+  background: #2a3a35;
+  color: #4d9d84;
+}

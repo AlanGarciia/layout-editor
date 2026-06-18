@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, memo } from "react";
 import { useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Transformer } from "react-konva";
 import {
   Upload, Eye, EyeOff, Trash2, Layers, ChevronDown, ChevronRight, Download,
@@ -293,13 +294,15 @@ function PropertiesPanel({
   layer,
   onChange,
   onCommit,
+  t,
 }: {
   layer?: EditorLayer;
   onChange: (l: EditorLayer) => void;
   onCommit: (l: EditorLayer) => void;
+  t: (k: string) => string;
 }) {
   if (!layer) {
-    return <div className="ed-props ed-props-empty">Selecciona una capa para ver sus propiedades.</div>;
+    return <div className="ed-props ed-props-empty">{t("selectLayer")}</div>;
   }
 
   const opacityPct = Math.round((layer.opacity ?? 1) * 100);
@@ -307,11 +310,11 @@ function PropertiesPanel({
   return (
     <div className="ed-props">
       <div className="ed-props-title">
-        <Settings2 size={14} /> Propiedades
+        <Settings2 size={14} /> {t("properties")}
       </div>
 
       <label className="ed-field">
-        <span>Nombre</span>
+        <span>{t("name")}</span>
         <input
           type="text"
           value={layer.name}
@@ -336,7 +339,7 @@ function PropertiesPanel({
       {layer.type === "text" && (
         <>
           <label className="ed-field">
-            <span>Tamano: {layer.fontSize}px</span>
+            <span>{t("size")}: {layer.fontSize}px</span>
             <input
               type="range"
               min="8"
@@ -348,7 +351,7 @@ function PropertiesPanel({
             />
           </label>
           <label className="ed-field">
-            <span>Color</span>
+            <span>{t("color")}</span>
             <input
               type="color"
               value={layer.fill}
@@ -365,6 +368,7 @@ function PropertiesPanel({
 // --- Componente principal ----------------------------------------------------
 
 export default function LayerEditor() {
+  const t = useTranslations("editor");
   const [layers, setLayers] = useState<EditorLayer[]>([]);
   const [canvas, setCanvas] = useState<CanvasSize>({ width: 800, height: 600 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -678,10 +682,10 @@ export default function LayerEditor() {
     const id = `layer-text-${Date.now()}`;
     const newLayer: EditorLayer = {
       id,
-      name: "Texto",
+      name: t("textLayer"),
       tag: "text",
       type: "text",
-      text: "Escribe aqui",
+      text: t("defaultText"),
       fontSize: 48,
       fill: "#15171c",
       x: canvas.width / 2 - 100,
@@ -848,28 +852,28 @@ export default function LayerEditor() {
       <header className="ed-header">
         <div className="ed-brand">
           <Layers size={18} strokeWidth={2.5} />
-          <span>Layer Editor</span>
+          <span>{t("brand")}</span>
         </div>
 
-        <button className="ed-icon-btn" onClick={undo} disabled={!canUndo} title="Deshacer (Ctrl+Z)">
+        <button className="ed-icon-btn" onClick={undo} disabled={!canUndo} title={t("undo")}>
           <Undo2 size={16} />
         </button>
-        <button className="ed-icon-btn" onClick={redo} disabled={!canRedo} title="Rehacer (Ctrl+Shift+Z)">
+        <button className="ed-icon-btn" onClick={redo} disabled={!canRedo} title={t("redo")}>
           <Redo2 size={16} />
         </button>
 
         <button className="ed-btn" onClick={() => fileRef.current?.click()}>
-          <Upload size={15} /> Subir SVG
+          <Upload size={15} /> {t("uploadSvg")}
         </button>
         <button className="ed-btn ed-btn-ghost" onClick={() => imgRef.current?.click()}>
-          <ImagePlus size={15} /> Anadir imagen
+          <ImagePlus size={15} /> {t("addImage")}
         </button>
         <button className="ed-btn ed-btn-ghost" onClick={addText}>
-          <Type size={15} /> Anadir texto
+          <Type size={15} /> {t("addText")}
         </button>
         {canSplit && (
           <button className="ed-btn ed-btn-ghost" onClick={() => splitByColor(selectedLayer!)}>
-            <Blend size={15} /> Separar por color
+            <Blend size={15} /> {t("splitColor")}
           </button>
         )}
         <button
@@ -877,14 +881,14 @@ export default function LayerEditor() {
           onClick={exportSvg}
           disabled={!hasContent}
         >
-          <FileCode size={15} /> Exportar SVG
+          <FileCode size={15} /> {t("exportSvg")}
         </button>
         <button
           className="ed-btn ed-btn-ghost"
           onClick={exportPsd}
           disabled={!hasContent || exporting}
         >
-          <Download size={15} /> {exporting ? "Exportando..." : "Exportar PSD"}
+          <Download size={15} /> {exporting ? t("exporting") : t("exportPsd")}
         </button>
         <input
           ref={fileRef}
@@ -907,12 +911,12 @@ export default function LayerEditor() {
           {!hasContent ? (
             <div className="ed-empty">
               {loading ? (
-                <p>Procesando...</p>
+                <p>{t("processing")}</p>
               ) : (
                 <>
                   <Upload size={32} strokeWidth={1.5} />
-                  <p>Arrastra un SVG o una imagen aqui.</p>
-                  <span>El SVG se separa en capas; los PNG/JPG entran como una capa que puedes separar por color. Tambien puedes anadir texto.</span>
+                  <p>{t("emptyTitle")}</p>
+                  <span>{t("emptyHint")}</span>
                 </>
               )}
               {error && <p className="ed-error">{error}</p>}
@@ -976,12 +980,12 @@ export default function LayerEditor() {
         <aside className={`ed-panel ${panelOpen ? "" : "ed-panel-collapsed"}`}>
           <button className="ed-panel-head" onClick={() => setPanelOpen((o) => !o)}>
             {panelOpen ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-            <span>Capas {layers.length > 0 && `(${layers.length})`}</span>
+            <span>{t("layers")} {layers.length > 0 && `(${layers.length})`}</span>
           </button>
           {panelOpen && (
             <>
               <ul className="ed-layer-list">
-                {layers.length === 0 && <li className="ed-layer-none">Sin capas</li>}
+                {layers.length === 0 && <li className="ed-layer-none">{t("noLayers")}</li>}
                 {[...layers].reverse().map((l) => (
                   <li
                     key={l.id}
@@ -1009,7 +1013,7 @@ export default function LayerEditor() {
                       setDragOverId(null);
                     }}
                   >
-                    <span className="ed-grip" title="Arrastra para reordenar">
+                    <span className="ed-grip" title={t("reorder")}>
                       <GripVertical size={14} />
                     </span>
                     <button
@@ -1018,7 +1022,7 @@ export default function LayerEditor() {
                         e.stopPropagation();
                         toggleVisible(l.id);
                       }}
-                      title={l.visible ? "Ocultar" : "Mostrar"}
+                      title={l.visible ? t("hide") : t("show")}
                     >
                       {l.visible ? <Eye size={15} /> : <EyeOff size={15} />}
                     </button>
@@ -1049,7 +1053,7 @@ export default function LayerEditor() {
                           e.stopPropagation();
                           setRenamingId(l.id);
                         }}
-                        title="Doble clic para renombrar"
+                        title={t("rename")}
                       >
                         {l.name}
                       </span>
@@ -1062,7 +1066,7 @@ export default function LayerEditor() {
                         e.stopPropagation();
                         moveLayer(l.id, 1);
                       }}
-                      title="Subir"
+                      title={t("moveUp")}
                     >
                       <ArrowUp size={14} />
                     </button>
@@ -1072,7 +1076,7 @@ export default function LayerEditor() {
                         e.stopPropagation();
                         moveLayer(l.id, -1);
                       }}
-                      title="Bajar"
+                      title={t("moveDown")}
                     >
                       <ArrowDown size={14} />
                     </button>
@@ -1082,7 +1086,7 @@ export default function LayerEditor() {
                         e.stopPropagation();
                         removeLayer(l.id);
                       }}
-                      title="Eliminar"
+                      title={t("delete")}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -1090,7 +1094,7 @@ export default function LayerEditor() {
                 ))}
               </ul>
 
-              <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onCommit={commitLayer} />
+              <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onCommit={commitLayer} t={t} />
             </>
           )}
         </aside>

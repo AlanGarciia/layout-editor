@@ -1,0 +1,99 @@
+{
+  "nav": {
+    "brand": "LayersWork",
+    "home": "Home",
+    "editor": "Editor",
+    "optimizer": "Optimizer"
+  },
+  "home": {
+    "badge": "Online layer editor",
+    "title": "Edit, separate and optimize your designs in the browser",
+    "subtitle": "Upload an image or SVG, split it into editable layers, add text and export to PSD or SVG. No installs, no watermarks.",
+    "openEditor": "Open the editor",
+    "optimizeImages": "Optimize images",
+    "toolsTitle": "Tools",
+    "toolsSubtitle": "Each tool works on its own, no signup. Try it and download the result.",
+    "tryIt": "Try it ->"
+  },
+  "footer": {
+    "editor": "Editor",
+    "optimizer": "Optimizer"
+  },
+  "tools": {
+    "image-to-layers": {
+      "title": "Separate image into color layers online",
+      "description": "Turn a flat image (PNG or JPG) into editable color layers. Free and no signup.",
+      "intro": "Upload an image and we automatically separate it into color layers, ready to edit or export."
+    },
+    "png-to-psd": {
+      "title": "Convert PNG to PSD with layers online",
+      "description": "Upload a PNG and download it as a Photoshop PSD file with layers. Free, no watermark.",
+      "intro": "Convert your PNG into an editable PSD keeping the layers. Nothing to install."
+    }
+  },
+  "landing": {
+    "back": "<- Home",
+    "dropHint": "Drag your file here or click",
+    "process": "Process",
+    "processing": "Processing...",
+    "download": "Download result",
+    "layersDetected": "{count} layers detected",
+    "editInEditor": "Edit these layers in the editor ->",
+    "openingEditor": "Opening editor...",
+    "howItWorks": "How it works",
+    "noSignup": "The whole process happens instantly and with no account needed. Upload your file, process and download the result."
+  },
+  "editor": {
+    "brand": "Layer Editor",
+    "uploadSvg": "Upload SVG",
+    "addImage": "Add image",
+    "addText": "Add text",
+    "splitColor": "Split by color",
+    "exportSvg": "Export SVG",
+    "exportPsd": "Export PSD",
+    "exporting": "Exporting...",
+    "undo": "Undo (Ctrl+Z)",
+    "redo": "Redo (Ctrl+Shift+Z)",
+    "processing": "Processing...",
+    "emptyTitle": "Drag an SVG or an image here.",
+    "emptyHint": "The SVG is split into layers; PNG/JPG come in as a layer you can split by color. You can also add text.",
+    "layers": "Layers",
+    "noLayers": "No layers",
+    "properties": "Properties",
+    "selectLayer": "Select a layer to see its properties.",
+    "name": "Name",
+    "opacity": "Opacity",
+    "size": "Size",
+    "color": "Color",
+    "show": "Show",
+    "hide": "Hide",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "delete": "Delete",
+    "rename": "Double click to rename",
+    "reorder": "Drag to reorder",
+    "defaultText": "Type here",
+    "textLayer": "Text"
+  },
+  "optimizer": {
+    "title": "Design Compressor + Optimizer",
+    "intro": "Upload images or SVG and get optimized versions for web, social or print.",
+    "presetWeb": "Web",
+    "presetWebDesc": "max 1920px, WebP, quality 78",
+    "presetSocial": "Social",
+    "presetSocialDesc": "max 1080px, JPG, quality 82",
+    "presetPrint": "Print",
+    "presetPrintDesc": "original size, quality 88",
+    "dropHint": "Drag images here or click to choose",
+    "dropFormats": "PNG, JPG, WebP and SVG. You can upload several at once.",
+    "optimize": "Optimize",
+    "optimizing": "Optimizing...",
+    "downloadAll": "Download all",
+    "clear": "Clear",
+    "totalSaving": "Total saving",
+    "queued": "Queued",
+    "done": "Done",
+    "noChange": "no change",
+    "download": "Download"
+  }
+}

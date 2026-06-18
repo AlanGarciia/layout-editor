@@ -1,0 +1,99 @@
+{
+  "nav": {
+    "brand": "LayersWork",
+    "home": "Inicio",
+    "editor": "Editor",
+    "optimizer": "Optimizer"
+  },
+  "home": {
+    "badge": "Editor de capas online",
+    "title": "Edita, separa y optimiza tus disenos en el navegador",
+    "subtitle": "Sube una imagen o un SVG, sepáralo en capas editables, anade texto y exporta a PSD o SVG. Sin instalar nada, sin marcas de agua.",
+    "openEditor": "Abrir el editor",
+    "optimizeImages": "Optimizar imagenes",
+    "toolsTitle": "Herramientas",
+    "toolsSubtitle": "Cada herramienta funciona sola, sin registro. Pruebala y descarga el resultado.",
+    "tryIt": "Probar ->"
+  },
+  "footer": {
+    "editor": "Editor",
+    "optimizer": "Optimizer"
+  },
+  "tools": {
+    "image-to-layers": {
+      "title": "Separar imagen en capas por color online",
+      "description": "Convierte una imagen plana (PNG o JPG) en capas editables por color. Gratis y sin registro.",
+      "intro": "Sube una imagen y la separamos automaticamente en capas por color, listas para editar o exportar."
+    },
+    "png-to-psd": {
+      "title": "Convertir PNG a PSD con capas online",
+      "description": "Sube un PNG y descargalo como archivo PSD de Photoshop con capas. Gratis, sin marca de agua.",
+      "intro": "Convierte tu PNG en un PSD editable manteniendo las capas. Sin instalar nada."
+    }
+  },
+  "landing": {
+    "back": "<- Inicio",
+    "dropHint": "Arrastra tu archivo aqui o haz clic",
+    "process": "Procesar",
+    "processing": "Procesando...",
+    "download": "Descargar resultado",
+    "layersDetected": "{count} capas detectadas",
+    "editInEditor": "Editar estas capas en el editor ->",
+    "openingEditor": "Abriendo editor...",
+    "howItWorks": "Como funciona",
+    "noSignup": "Todo el proceso ocurre al instante y sin necesidad de crear una cuenta. Sube tu archivo, procesa y descarga el resultado."
+  },
+  "editor": {
+    "brand": "Layer Editor",
+    "uploadSvg": "Subir SVG",
+    "addImage": "Anadir imagen",
+    "addText": "Anadir texto",
+    "splitColor": "Separar por color",
+    "exportSvg": "Exportar SVG",
+    "exportPsd": "Exportar PSD",
+    "exporting": "Exportando...",
+    "undo": "Deshacer (Ctrl+Z)",
+    "redo": "Rehacer (Ctrl+Shift+Z)",
+    "processing": "Procesando...",
+    "emptyTitle": "Arrastra un SVG o una imagen aqui.",
+    "emptyHint": "El SVG se separa en capas; los PNG/JPG entran como una capa que puedes separar por color. Tambien puedes anadir texto.",
+    "layers": "Capas",
+    "noLayers": "Sin capas",
+    "properties": "Propiedades",
+    "selectLayer": "Selecciona una capa para ver sus propiedades.",
+    "name": "Nombre",
+    "opacity": "Opacidad",
+    "size": "Tamano",
+    "color": "Color",
+    "show": "Mostrar",
+    "hide": "Ocultar",
+    "moveUp": "Subir",
+    "moveDown": "Bajar",
+    "delete": "Eliminar",
+    "rename": "Doble clic para renombrar",
+    "reorder": "Arrastra para reordenar",
+    "defaultText": "Escribe aqui",
+    "textLayer": "Texto"
+  },
+  "optimizer": {
+    "title": "Design Compressor + Optimizer",
+    "intro": "Sube imagenes o SVG y obten versiones optimizadas para web, redes o impresion.",
+    "presetWeb": "Web",
+    "presetWebDesc": "max 1920px, WebP, calidad 78",
+    "presetSocial": "Redes",
+    "presetSocialDesc": "max 1080px, JPG, calidad 82",
+    "presetPrint": "Impresion",
+    "presetPrintDesc": "tamano original, calidad 88",
+    "dropHint": "Arrastra imagenes aqui o haz clic para elegir",
+    "dropFormats": "PNG, JPG, WebP y SVG. Puedes subir varias a la vez.",
+    "optimize": "Optimizar",
+    "optimizing": "Optimizando...",
+    "downloadAll": "Descargar todo",
+    "clear": "Limpiar",
+    "totalSaving": "Ahorro total",
+    "queued": "En cola",
+    "done": "Hecho",
+    "noChange": "sin cambio",
+    "download": "Descargar"
+  }
+}

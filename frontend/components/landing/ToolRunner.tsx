@@ -1,19 +1,10 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
+import { useRouter } from "@/i18n/navigation";
 import type { ToolConfig } from "@/lib/tools.config";
 import { runPlugin } from "@/lib/api";
-
-/*
- * ToolRunner (cliente)
- * --------------------
- * Demo generica para cualquier landing. Sube un archivo, llama al plugin de la
- * config y muestra el resultado segun tool.outputKind.
- *
- * Para "layers": ofrece "Editar en el editor", que guarda las capas como un
- * proyecto temporal en el backend y navega a /app/editor?project={id}.
- */
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -31,6 +22,7 @@ interface LayersResult {
 }
 
 export default function ToolRunner({ tool }: { tool: ToolConfig }) {
+  const t = useTranslations("landing");
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,17 +55,15 @@ export default function ToolRunner({ tool }: { tool: ToolConfig }) {
       } else if (res.blob) {
         setDownloadUrl(URL.createObjectURL(res.blob));
       } else {
-        throw new Error("El plugin no devolvio un resultado valido.");
+        throw new Error("No valid result.");
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Error desconocido");
+      setError(e instanceof Error ? e.message : "Error");
     } finally {
       setBusy(false);
     }
   };
 
-  // Convierte las capas del plugin al formato del editor y las guarda como
-  // proyecto temporal en el backend; luego navega al editor con el id.
   const editInEditor = async () => {
     if (!result) return;
     setSaving(true);
@@ -86,7 +76,7 @@ export default function ToolRunner({ tool }: { tool: ToolConfig }) {
         tag: "color",
         type: "image",
         svg: null,
-        png: cl.png, // el editor cargara el HTMLImageElement desde este dataURL
+        png: cl.png,
         file: null,
         visible: true,
         opacity: 1,
@@ -100,17 +90,13 @@ export default function ToolRunner({ tool }: { tool: ToolConfig }) {
       const res = await fetch(`${API_URL}/api/projects`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          width: result.width,
-          height: result.height,
-          layers: editorLayers,
-        }),
+        body: JSON.stringify({ width: result.width, height: result.height, layers: editorLayers }),
       });
-      if (!res.ok) throw new Error("No se pudo guardar el proyecto.");
+      if (!res.ok) throw new Error("Could not save project.");
       const { id } = await res.json();
       router.push(`/app/editor?project=${id}`);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Error al abrir el editor");
+      setError(e instanceof Error ? e.message : "Error");
       setSaving(false);
     }
   };
@@ -130,7 +116,7 @@ export default function ToolRunner({ tool }: { tool: ToolConfig }) {
           <p className="tr-filename">{file.name}</p>
         ) : (
           <>
-            <p>Arrastra tu archivo aqui o haz clic</p>
+            <p>{t("dropHint")}</p>
             <span>{tool.accept.replace(/image\/\*/g, "imagenes")}</span>
           </>
         )}
@@ -144,20 +130,20 @@ export default function ToolRunner({ tool }: { tool: ToolConfig }) {
       </div>
 
       <button className="tr-btn" onClick={run} disabled={!file || busy}>
-        {busy ? "Procesando..." : "Procesar"}
+        {busy ? t("processing") : t("process")}
       </button>
 
       {error && <p className="tr-error">{error}</p>}
 
       {downloadUrl && (
         <a className="tr-download" href={downloadUrl} download={`${tool.slug}-resultado`}>
-          Descargar resultado
+          {t("download")}
         </a>
       )}
 
       {result && (
         <div className="tr-layers">
-          <p className="tr-layers-title">{result.layers.length} capas detectadas</p>
+          <p className="tr-layers-title">{t("layersDetected", { count: result.layers.length })}</p>
           <div className="tr-layers-grid">
             {result.layers.map((l, i) => (
               <div className="tr-layer" key={i}>
@@ -167,7 +153,7 @@ export default function ToolRunner({ tool }: { tool: ToolConfig }) {
             ))}
           </div>
           <button className="tr-cta-editor" onClick={editInEditor} disabled={saving}>
-            {saving ? "Abriendo editor..." : "Editar estas capas en el editor ->"}
+            {saving ? t("openingEditor") : t("editInEditor")}
           </button>
         </div>
       )}
