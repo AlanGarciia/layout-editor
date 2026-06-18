@@ -1,5 +1,15 @@
 """
 Fase 1 (ampliacion) - Crear capas desde una imagen plana
+--------------------------------------------------------
+Separa un PNG/JPG en capas por color, agrupando colores parecidos para
+no generar demasiadas capas.
+
+Endpoint:
+  POST /layers/split-color   (multipart/form-data)
+    file:        imagen (PNG/JPG/WebP)
+    n_colors:    colores iniciales de cuantizacion (def. 12)
+    merge_dist:  distancia para fusionar colores parecidos (def. 40)
+    min_percent: % minimo de pixeles para que una capa exista (def. 1.0)
 """
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
