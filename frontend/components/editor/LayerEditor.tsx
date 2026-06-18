@@ -1,22 +1,28 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, memo } from "react";
+import { useSearchParams } from "next/navigation";
 import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Transformer } from "react-konva";
 import {
   Upload, Eye, EyeOff, Trash2, Layers, ChevronDown, ChevronRight, Download,
   ArrowUp, ArrowDown, Type, GripVertical, FileCode, ImagePlus, Blend, Settings2,
+  Undo2, Redo2,
 } from "lucide-react";
 
 /*
- * LayerEditor (Next.js / TypeScript)
- * ----------------------------------
- * Editor de capas: separa SVG, anade PNG/JPG y texto, separa imagenes por color,
- * mover/escalar/rotar/reordenar, propiedades (renombrar, opacidad, texto).
+ * LayerEditor (Next.js / TypeScript) con undo/redo
+ * ------------------------------------------------
+ * Historial de snapshots del array de capas (referencias de imagen compartidas).
+ * - commit(next): aplica un cambio Y lo registra en el historial.
+ * - setLayers directo: para cambios intermedios (arrastre) que NO crean historial.
+ * - undo/redo: Ctrl+Z / Ctrl+Shift+Z (o Ctrl+Y), y botones en la cabecera.
+ * - limite de 50 pasos.
  *
- * "use client" + carga dinamica sin SSR en la pagina: Konva necesita el navegador.
+ * Carga ?project=ID del backend al montar.
  */
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const HISTORY_LIMIT = 50;
 
 // --- Tipos -------------------------------------------------------------------
 
@@ -30,6 +36,7 @@ interface EditorLayer {
   svg?: string | null;
   img?: HTMLImageElement | null;
   file?: File | null;
+  png?: string | null;
   visible: boolean;
   opacity: number;
   x: number;
@@ -37,7 +44,6 @@ interface EditorLayer {
   rotation: number;
   scaleX: number;
   scaleY: number;
-  // solo texto
   text?: string;
   fontSize?: number;
   fill?: string;
@@ -152,6 +158,15 @@ function fileToImage(file: Blob): Promise<HTMLImageElement> {
   });
 }
 
+function dataUrlToImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const im = new window.Image();
+    im.onload = () => resolve(im);
+    im.onerror = () => reject(new Error("Imagen de capa invalida"));
+    im.src = dataUrl;
+  });
+}
+
 function imageToDataUrl(img: HTMLImageElement, w: number, h: number): string {
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(w));
@@ -161,7 +176,6 @@ function imageToDataUrl(img: HTMLImageElement, w: number, h: number): string {
   return canvas.toDataURL("image/png");
 }
 
-// Vuelca una capa a PNG base64 (aplica opacidad). Para el export PSD.
 function layerToPng(layer: EditorLayer): string {
   if (layer.type === "text") {
     const canvas = document.createElement("canvas");
@@ -200,12 +214,13 @@ function layerToPng(layer: EditorLayer): string {
 interface CanvasLayerProps {
   layer: EditorLayer;
   isSelected: boolean;
-  onChange: (l: EditorLayer) => void;
+  onChange: (l: EditorLayer) => void;       // cambio intermedio (sin historial)
+  onCommit: (l: EditorLayer) => void;       // cambio final (con historial)
   onEditText: (l: EditorLayer) => void;
   hidden: boolean;
 }
 
-function CanvasLayer({ layer, isSelected, onChange, onEditText, hidden }: CanvasLayerProps) {
+const CanvasLayer = memo(function CanvasLayer({ layer, isSelected, onChange, onCommit, onEditText, hidden }: CanvasLayerProps) {
   const ref = useRef<any>(null);
   const trRef = useRef<any>(null);
 
@@ -228,10 +243,11 @@ function CanvasLayer({ layer, isSelected, onChange, onEditText, hidden }: Canvas
     opacity: layer.opacity ?? 1,
     draggable: isSelected,
     listening: isSelected,
-    onDragEnd: (e: any) => onChange({ ...layer, x: e.target.x(), y: e.target.y() }),
+    // al SOLTAR el arrastre se registra en historial (onCommit)
+    onDragEnd: (e: any) => onCommit({ ...layer, x: e.target.x(), y: e.target.y() }),
     onTransformEnd: () => {
       const node = ref.current;
-      onChange({
+      onCommit({
         ...layer,
         x: node.x(),
         y: node.y(),
@@ -269,11 +285,19 @@ function CanvasLayer({ layer, isSelected, onChange, onEditText, hidden }: Canvas
       )}
     </>
   );
-}
+});
 
 // --- Panel de propiedades ----------------------------------------------------
 
-function PropertiesPanel({ layer, onChange }: { layer?: EditorLayer; onChange: (l: EditorLayer) => void }) {
+function PropertiesPanel({
+  layer,
+  onChange,
+  onCommit,
+}: {
+  layer?: EditorLayer;
+  onChange: (l: EditorLayer) => void;
+  onCommit: (l: EditorLayer) => void;
+}) {
   if (!layer) {
     return <div className="ed-props ed-props-empty">Selecciona una capa para ver sus propiedades.</div>;
   }
@@ -292,6 +316,7 @@ function PropertiesPanel({ layer, onChange }: { layer?: EditorLayer; onChange: (
           type="text"
           value={layer.name}
           onChange={(e) => onChange({ ...layer, name: e.target.value })}
+          onBlur={(e) => onCommit({ ...layer, name: e.target.value })}
         />
       </label>
 
@@ -303,6 +328,8 @@ function PropertiesPanel({ layer, onChange }: { layer?: EditorLayer; onChange: (
           max="100"
           value={opacityPct}
           onChange={(e) => onChange({ ...layer, opacity: Number(e.target.value) / 100 })}
+          onMouseUp={(e) => onCommit({ ...layer, opacity: Number((e.target as HTMLInputElement).value) / 100 })}
+          onTouchEnd={(e) => onCommit({ ...layer, opacity: Number((e.target as HTMLInputElement).value) / 100 })}
         />
       </label>
 
@@ -316,6 +343,8 @@ function PropertiesPanel({ layer, onChange }: { layer?: EditorLayer; onChange: (
               max="200"
               value={layer.fontSize}
               onChange={(e) => onChange({ ...layer, fontSize: Number(e.target.value) })}
+              onMouseUp={(e) => onCommit({ ...layer, fontSize: Number((e.target as HTMLInputElement).value) })}
+              onTouchEnd={(e) => onCommit({ ...layer, fontSize: Number((e.target as HTMLInputElement).value) })}
             />
           </label>
           <label className="ed-field">
@@ -324,6 +353,7 @@ function PropertiesPanel({ layer, onChange }: { layer?: EditorLayer; onChange: (
               type="color"
               value={layer.fill}
               onChange={(e) => onChange({ ...layer, fill: e.target.value })}
+              onBlur={(e) => onCommit({ ...layer, fill: e.target.value })}
             />
           </label>
         </>
@@ -346,10 +376,120 @@ export default function LayerEditor() {
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [editing, setEditing] = useState<EditingState | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+
+  // --- Historial (undo/redo) ---
+  const [past, setPast] = useState<EditorLayer[][]>([]);
+  const [future, setFuture] = useState<EditorLayer[][]>([]);
+
   const fileRef = useRef<HTMLInputElement>(null);
   const imgRef = useRef<HTMLInputElement>(null);
   const stageRef = useRef<any>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const searchParams = useSearchParams();
+
+  // commit: aplica un nuevo estado de capas Y lo registra en el historial.
+  // recibe el array nuevo o una funcion (prev) => nuevo.
+  const commit = useCallback(
+    (updater: EditorLayer[] | ((prev: EditorLayer[]) => EditorLayer[])) => {
+      setLayers((prev) => {
+        const next = typeof updater === "function" ? (updater as any)(prev) : updater;
+        // guarda el estado anterior en el historial
+        setPast((p) => {
+          const np = [...p, prev];
+          return np.length > HISTORY_LIMIT ? np.slice(np.length - HISTORY_LIMIT) : np;
+        });
+        setFuture([]); // cualquier cambio nuevo invalida el redo
+        return next;
+      });
+    },
+    []
+  );
+
+  const undo = useCallback(() => {
+    setPast((p) => {
+      if (p.length === 0) return p;
+      const previous = p[p.length - 1];
+      setLayers((current) => {
+        setFuture((f) => [current, ...f]);
+        return previous;
+      });
+      return p.slice(0, -1);
+    });
+    setEditing(null);
+  }, []);
+
+  const redo = useCallback(() => {
+    setFuture((f) => {
+      if (f.length === 0) return f;
+      const next = f[0];
+      setLayers((current) => {
+        setPast((p) => [...p, current]);
+        return next;
+      });
+      return f.slice(1);
+    });
+    setEditing(null);
+  }, []);
+
+  const canUndo = past.length > 0;
+  const canRedo = future.length > 0;
+
+  // Atajos de teclado: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z o Ctrl+Y (redo)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      const key = e.key.toLowerCase();
+      // no interferir si se esta escribiendo en un input/textarea
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if ((key === "z" && e.shiftKey) || key === "y") {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
+
+  // Carga ?project=ID al montar. (No entra en historial: es el estado inicial.)
+  useEffect(() => {
+    const projectId = searchParams.get("project");
+    if (!projectId) return;
+
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`${API_URL}/api/projects/${projectId}`);
+        if (!res.ok) throw new Error("No se pudo cargar el proyecto.");
+        const data = await res.json();
+
+        const loaded: EditorLayer[] = await Promise.all(
+          (data.layers || []).map(async (l: any) => ({
+            ...l,
+            img: l.png ? await dataUrlToImage(l.png) : null,
+          }))
+        );
+
+        setCanvas({ width: data.width, height: data.height });
+        setLayers(loaded);
+        setPast([]);
+        setFuture([]);
+        setSelectedId(null);
+      } catch (e: any) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const handleFile = useCallback(async (file?: File | null) => {
     if (!file) return;
@@ -368,6 +508,8 @@ export default function LayerEditor() {
 
       setCanvas({ width, height });
       setLayers(withImages);
+      setPast([]);
+      setFuture([]);
       setSelectedId(null);
     } catch (e: any) {
       setError(e.message);
@@ -393,30 +535,28 @@ export default function LayerEditor() {
 
       const id = `layer-img-${Date.now()}`;
       const name = file.name.replace(/\.[^.]+$/, "");
-      setLayers((prev) => [
-        ...prev,
-        {
-          id,
-          name: name || "Imagen",
-          tag: "png",
-          type: "image",
-          svg: null,
-          img,
-          file,
-          visible: true,
-          opacity: 1,
-          x: Math.max(0, (cw - img.width) / 2),
-          y: Math.max(0, (ch - img.height) / 2),
-          rotation: 0,
-          scaleX: 1,
-          scaleY: 1,
-        },
-      ]);
+      const newLayer: EditorLayer = {
+        id,
+        name: name || "Imagen",
+        tag: "png",
+        type: "image",
+        svg: null,
+        img,
+        file,
+        visible: true,
+        opacity: 1,
+        x: Math.max(0, (cw - img.width) / 2),
+        y: Math.max(0, (ch - img.height) / 2),
+        rotation: 0,
+        scaleX: 1,
+        scaleY: 1,
+      };
+      commit((prev) => [...prev, newLayer]);
       setSelectedId(id);
     } catch (e: any) {
       setError(e.message);
     }
-  }, [canvas.width, canvas.height, layers.length]);
+  }, [canvas.width, canvas.height, layers.length, commit]);
 
   const splitByColor = async (layer: EditorLayer) => {
     if (!layer || !layer.file) {
@@ -446,18 +586,10 @@ export default function LayerEditor() {
       }
 
       const stamp = Date.now();
-      const loadImg = (dataUrl: string): Promise<HTMLImageElement> =>
-        new Promise((resolve, reject) => {
-          const im = new window.Image();
-          im.onload = () => resolve(im);
-          im.onerror = () => reject(new Error("Imagen de capa invalida"));
-          im.src = dataUrl;
-        });
-
       const newLayers: EditorLayer[] = [];
       for (let i = 0; i < data.layers.length; i++) {
         const cl = data.layers[i];
-        const img = await loadImg(cl.png);
+        const img = await dataUrlToImage(cl.png);
         newLayers.push({
           id: `layer-color-${stamp}-${i}`,
           name: cl.name,
@@ -476,7 +608,7 @@ export default function LayerEditor() {
         });
       }
 
-      setLayers((prev) => {
+      commit((prev) => {
         const idx = prev.findIndex((l) => l.id === layer.id);
         if (idx < 0) return [...prev, ...newLayers];
         const next = [...prev];
@@ -502,21 +634,24 @@ export default function LayerEditor() {
     else addImage(file);
   };
 
+  // cambio intermedio (sin historial): durante arrastre o slider
   const updateLayer = (updated: EditorLayer) =>
     setLayers((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
 
+  // cambio final (con historial)
+  const commitLayer = (updated: EditorLayer) =>
+    commit((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+
   const toggleVisible = (id: string) =>
-    setLayers((prev) =>
-      prev.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l))
-    );
+    commit((prev) => prev.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l)));
 
   const removeLayer = (id: string) => {
-    setLayers((prev) => prev.filter((l) => l.id !== id));
+    commit((prev) => prev.filter((l) => l.id !== id));
     if (selectedId === id) setSelectedId(null);
   };
 
   const moveLayer = (id: string, dir: number) => {
-    setLayers((prev) => {
+    commit((prev) => {
       const i = prev.findIndex((l) => l.id === id);
       const j = i + dir;
       if (i < 0 || j < 0 || j >= prev.length) return prev;
@@ -528,7 +663,7 @@ export default function LayerEditor() {
 
   const reorderLayers = (fromId: string, toId: string) => {
     if (fromId === toId) return;
-    setLayers((prev) => {
+    commit((prev) => {
       const from = prev.findIndex((l) => l.id === fromId);
       const to = prev.findIndex((l) => l.id === toId);
       if (from < 0 || to < 0) return prev;
@@ -558,7 +693,7 @@ export default function LayerEditor() {
       opacity: 1,
       img: null,
     };
-    setLayers((prev) => [...prev, newLayer]);
+    commit((prev) => [...prev, newLayer]);
     setSelectedId(id);
     setTimeout(() => startEditing(newLayer), 0);
   };
@@ -582,7 +717,7 @@ export default function LayerEditor() {
   const commitEditing = () => {
     if (!editing) return;
     const value = editing.value;
-    setLayers((prev) =>
+    commit((prev) =>
       prev.map((l) =>
         l.id === editing.id
           ? { ...l, text: value, name: value.split("\n")[0].slice(0, 20) || "Texto" }
@@ -637,7 +772,7 @@ export default function LayerEditor() {
       a.href = url;
       a.download = "export.psd";
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
     } catch (e: any) {
       setError(`No se pudo exportar: ${e.message}`);
     } finally {
@@ -693,7 +828,7 @@ export default function LayerEditor() {
     a.href = url;
     a.download = "export.svg";
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
   };
 
   const maxW = 720;
@@ -715,6 +850,14 @@ export default function LayerEditor() {
           <Layers size={18} strokeWidth={2.5} />
           <span>Layer Editor</span>
         </div>
+
+        <button className="ed-icon-btn" onClick={undo} disabled={!canUndo} title="Deshacer (Ctrl+Z)">
+          <Undo2 size={16} />
+        </button>
+        <button className="ed-icon-btn" onClick={redo} disabled={!canRedo} title="Rehacer (Ctrl+Shift+Z)">
+          <Redo2 size={16} />
+        </button>
+
         <button className="ed-btn" onClick={() => fileRef.current?.click()}>
           <Upload size={15} /> Subir SVG
         </button>
@@ -795,6 +938,7 @@ export default function LayerEditor() {
                         layer={l}
                         isSelected={l.id === selectedId}
                         onChange={updateLayer}
+                        onCommit={commitLayer}
                         onEditText={startEditing}
                         hidden={!!editing && editing.id === l.id}
                       />
@@ -886,12 +1030,12 @@ export default function LayerEditor() {
                         defaultValue={l.name}
                         onClick={(e) => e.stopPropagation()}
                         onBlur={(e) => {
-                          updateLayer({ ...l, name: e.target.value || l.name });
+                          commitLayer({ ...l, name: e.target.value || l.name });
                           setRenamingId(null);
                         }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
-                            updateLayer({ ...l, name: (e.target as HTMLInputElement).value || l.name });
+                            commitLayer({ ...l, name: (e.target as HTMLInputElement).value || l.name });
                             setRenamingId(null);
                           } else if (e.key === "Escape") {
                             setRenamingId(null);
@@ -946,7 +1090,7 @@ export default function LayerEditor() {
                 ))}
               </ul>
 
-              <PropertiesPanel layer={selectedLayer} onChange={updateLayer} />
+              <PropertiesPanel layer={selectedLayer} onChange={updateLayer} onCommit={commitLayer} />
             </>
           )}
         </aside>
@@ -974,6 +1118,11 @@ const styles = `
   .ed-btn-ghost { background:transparent; color:var(--txt);
     box-shadow:inset 0 0 0 1px var(--line); }
   .ed-btn-ghost:hover:not(:disabled) { background:#23262f; filter:none; }
+  .ed-icon-btn { display:inline-flex; align-items:center; justify-content:center;
+    background:transparent; color:var(--txt); border:0; box-shadow:inset 0 0 0 1px var(--line);
+    width:34px; height:34px; border-radius:8px; cursor:pointer; }
+  .ed-icon-btn:hover:not(:disabled) { background:#23262f; }
+  .ed-icon-btn:disabled { opacity:.35; cursor:not-allowed; }
   .ed-body { display:flex; flex:1; min-height:0; }
   .ed-canvas-wrap { flex:1; position:relative; display:flex; align-items:center;
     justify-content:center; padding:24px; background:

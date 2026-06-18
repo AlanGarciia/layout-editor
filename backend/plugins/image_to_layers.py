@@ -1,12 +1,17 @@
-# backend/plugins/color_split.py
+"""
+Plugin: separar una imagen en capas por color.
+Envuelve la logica existente en services/color_split.py.
+Devuelve JSON con las capas (cada una PNG en base64).
+"""
+
 from typing import Any, Dict
+
 from plugins.base import Plugin, PluginResult, register
-from core.image import load_rgba, limit_size
-# ... la logica que ya tienes en services/color_split.py
+from services.color_split import split_by_color
 
 
 @register
-class ColorSplitPlugin(Plugin):
+class ImageToLayersPlugin(Plugin):
     name = "image_to_layers"
     title = "Separar imagen en capas por color"
     accepts = ["image/png", "image/jpeg", "image/webp"]

@@ -1,13 +1,14 @@
 """
-Layer Editor + Design Optimizer API
+LayerForge API
 """
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import psd, layers, optimize
+from routers import psd, layers, optimize, plugins, projects
+from plugins.base import discover
 
-app = FastAPI(title="Layer Editor + Design Optimizer API")
+app = FastAPI(title="LayerForge API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,6 +29,17 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/")
+def root():
+    return {"name": "LayerForge API", "docs": "/docs"}
+
+
+# Descubre y registra los plugins
+discover()
+
+# Routers
 app.include_router(psd.router)
 app.include_router(layers.router)
 app.include_router(optimize.router)
+app.include_router(plugins.router)
+app.include_router(projects.router)

@@ -40,3 +40,5 @@ Thumbs.db
 # === Archivos generados por la app (opcional) ===
 *.psd
 export.svg
+
+backend/storage_data/
