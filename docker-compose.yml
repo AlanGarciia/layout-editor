@@ -1,0 +1,49 @@
+# LayersWork - stack para Portainer
+# Despliega frontend (Next) y backend (FastAPI).
+# El SSL y el dominio los gestiona Nginx Proxy Manager (otro stack), que
+# apuntara a estos contenedores por su nombre de red.
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+    container_name: layerswork-backend
+    restart: unless-stopped
+    expose:
+      - "8000"
+    volumes:
+      # persistencia de los proyectos temporales (sobreviven a reinicios)
+      - layerswork_storage:/app/storage_data
+    networks:
+      - layerswork
+      - proxy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+      args:
+        # estas URLs se incrustan en el build del frontend
+        NEXT_PUBLIC_API_URL: "https://api.layerswork.com"
+        NEXT_PUBLIC_SITE_URL: "https://layerswork.com"
+    container_name: layerswork-frontend
+    restart: unless-stopped
+    expose:
+      - "3000"
+    depends_on:
+      - backend
+    networks:
+      - layerswork
+      - proxy
+
+volumes:
+  layerswork_storage:
+
+networks:
+  # red interna entre frontend y backend
+  layerswork:
+    driver: bridge
+  # red compartida con Nginx Proxy Manager (debe existir)
+  proxy:
+    external: true
