@@ -1,7 +1,7 @@
 # LayersWork - stack para Portainer
-# Despliega frontend (Next) y backend (FastAPI).
-# El SSL y el dominio los gestiona Nginx Proxy Manager (otro stack), que
-# apuntara a estos contenedores por su nombre de red.
+# Usa nginx-proxy (reverse_proxy): los contenedores se exponen mediante
+# las variables VIRTUAL_HOST / VIRTUAL_PORT / LETSENCRYPT_HOST, que el proxy
+# y su companion de SSL detectan automaticamente.
 
 services:
   backend:
@@ -12,11 +12,14 @@ services:
     restart: unless-stopped
     expose:
       - "8000"
+    environment:
+      - VIRTUAL_HOST=api.layerswork.com
+      - VIRTUAL_PORT=8000
+      - LETSENCRYPT_HOST=api.layerswork.com
+      - LETSENCRYPT_EMAIL=tu@email.com
     volumes:
-      # persistencia de los proyectos temporales (sobreviven a reinicios)
       - layerswork_storage:/app/storage_data
     networks:
-      - layerswork
       - proxy
 
   frontend:
@@ -24,26 +27,26 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.frontend
       args:
-        # estas URLs se incrustan en el build del frontend
         NEXT_PUBLIC_API_URL: "https://api.layerswork.com"
         NEXT_PUBLIC_SITE_URL: "https://layerswork.com"
     container_name: layerswork-frontend
     restart: unless-stopped
     expose:
       - "3000"
+    environment:
+      - VIRTUAL_HOST=layerswork.com,www.layerswork.com
+      - VIRTUAL_PORT=3000
+      - LETSENCRYPT_HOST=layerswork.com,www.layerswork.com
+      - LETSENCRYPT_EMAIL=tu@email.com
     depends_on:
       - backend
     networks:
-      - layerswork
       - proxy
 
 volumes:
   layerswork_storage:
 
 networks:
-  # red interna entre frontend y backend
-  layerswork:
-    driver: bridge
-  # red compartida con Nginx Proxy Manager (debe existir)
   proxy:
     external: true
+    name: prova_competencial_network
