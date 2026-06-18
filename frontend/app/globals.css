@@ -1,0 +1,228 @@
+@import "tailwindcss";
+
+/* ====== Base global: fondo oscuro en toda la pagina ====== */
+html, body {
+  background: #15171c;
+  color: #e6e8ec;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ====== Estilos de la home ====== */
+.lf-home {
+  --bg: #15171c;
+  --panel: #1d2027;
+  --line: #2a2e38;
+  --txt: #e6e8ec;
+  --muted: #8b90a0;
+  --accent: #4d9d84;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--txt);
+  font-family: 'DM Sans', system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+
+/* HERO */
+.lf-hero {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 96px 24px 64px;
+  text-align: center;
+}
+.lf-badge {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(77, 157, 132, 0.12);
+  border: 1px solid rgba(77, 157, 132, 0.3);
+  padding: 5px 12px;
+  border-radius: 999px;
+  margin-bottom: 24px;
+}
+.lf-hero-title {
+  font-size: 52px;
+  line-height: 1.08;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 20px;
+}
+.lf-hero-sub {
+  font-size: 18px;
+  color: var(--muted);
+  max-width: 600px;
+  margin: 0 auto 36px;
+  line-height: 1.5;
+}
+.lf-hero-cta {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.lf-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 13px 26px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 15px;
+  text-decoration: none;
+  transition: filter 0.15s, background 0.15s;
+  cursor: pointer;
+}
+.lf-btn-primary {
+  background: var(--accent);
+  color: #0c0d10;
+}
+.lf-btn-primary:hover {
+  filter: brightness(1.08);
+}
+.lf-btn-ghost {
+  background: transparent;
+  color: var(--txt);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.lf-btn-ghost:hover {
+  background: #23262f;
+}
+
+/* TOOLS */
+.lf-tools {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+  width: 100%;
+  flex: 1;
+}
+.lf-section-title {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+  text-align: center;
+}
+.lf-section-sub {
+  color: var(--muted);
+  text-align: center;
+  margin: 0 0 36px;
+  font-size: 15px;
+}
+.lf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.lf-card {
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 22px;
+  text-decoration: none;
+  color: var(--txt);
+  transition: border-color 0.15s, transform 0.15s;
+}
+.lf-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+.lf-card h3 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+.lf-card p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+.lf-card-link {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+/* FOOTER */
+.lf-footer {
+  border-top: 1px solid var(--line);
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 28px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 14px;
+  width: 100%;
+}
+.lf-footer span {
+  font-weight: 600;
+  color: var(--accent);
+}
+.lf-footer nav {
+  display: flex;
+  gap: 20px;
+}
+.lf-footer nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+.lf-footer nav a:hover {
+  color: var(--txt);
+}
+
+@media (max-width: 600px) {
+  .lf-hero-title { font-size: 36px; }
+  .lf-hero { padding: 64px 20px 48px; }
+}
+
+/* ====== Nav global ====== */
+.lf-nav {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 24px;
+  background: #1d2027;
+  border-bottom: 1px solid #2a2e38;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.lf-nav-brand {
+  font-weight: 700;
+  color: #4d9d84;
+  text-decoration: none;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+.lf-nav-links {
+  display: flex;
+  gap: 4px;
+}
+.lf-nav-link {
+  color: #8b90a0;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 7px;
+  transition: color 0.15s, background 0.15s;
+}
+.lf-nav-link:hover {
+  color: #e6e8ec;
+  background: #23262f;
+}
+.lf-nav-active {
+  color: #4d9d84;
+  background: #2a3a35;
+}
