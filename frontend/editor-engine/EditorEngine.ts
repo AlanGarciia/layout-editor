@@ -1,4 +1,3 @@
-import Konva from "konva";
 import { KonvaRenderer } from "./KonvaRenderer";
 import { HistoryManager } from "./HistoryManager";
 import { EventEmitter } from "./events";
