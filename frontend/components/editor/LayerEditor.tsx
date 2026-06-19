@@ -10,22 +10,8 @@ import {
   Undo2, Redo2,
 } from "lucide-react";
 
-/*
- * LayerEditor (Next.js / TypeScript) con undo/redo
- * ------------------------------------------------
- * Historial de snapshots del array de capas (referencias de imagen compartidas).
- * - commit(next): aplica un cambio Y lo registra en el historial.
- * - setLayers directo: para cambios intermedios (arrastre) que NO crean historial.
- * - undo/redo: Ctrl+Z / Ctrl+Shift+Z (o Ctrl+Y), y botones en la cabecera.
- * - limite de 50 pasos.
- *
- * Carga ?project=ID del backend al montar.
- */
-
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const HISTORY_LIMIT = 50;
-
-// --- Tipos -------------------------------------------------------------------
 
 type LayerType = "image" | "text";
 
@@ -60,8 +46,6 @@ interface EditingState {
   value: string;
   style: React.CSSProperties;
 }
-
-// --- Utilidades de SVG / imagen ----------------------------------------------
 
 function splitSvgIntoLayers(svgText: string): { layers: EditorLayer[]; width: number; height: number } {
   const parser = new DOMParser();
@@ -210,13 +194,11 @@ function layerToPng(layer: EditorLayer): string {
   return canvas.toDataURL("image/png");
 }
 
-// --- Capa individual en el canvas -------------------------------------------
-
 interface CanvasLayerProps {
   layer: EditorLayer;
   isSelected: boolean;
-  onChange: (l: EditorLayer) => void;       // cambio intermedio (sin historial)
-  onCommit: (l: EditorLayer) => void;       // cambio final (con historial)
+  onChange: (l: EditorLayer) => void;
+  onCommit: (l: EditorLayer) => void;
   onEditText: (l: EditorLayer) => void;
   hidden: boolean;
 }
@@ -244,7 +226,8 @@ const CanvasLayer = memo(function CanvasLayer({ layer, isSelected, onChange, onC
     opacity: layer.opacity ?? 1,
     draggable: isSelected,
     listening: isSelected,
-    // al SOLTAR el arrastre se registra en historial (onCommit)
+    perfectDrawEnabled: false,
+    shadowForStrokeEnabled: false,
     onDragEnd: (e: any) => onCommit({ ...layer, x: e.target.x(), y: e.target.y() }),
     onTransformEnd: () => {
       const node = ref.current;
@@ -286,9 +269,16 @@ const CanvasLayer = memo(function CanvasLayer({ layer, isSelected, onChange, onC
       )}
     </>
   );
+}, (prev, next) => {
+  return (
+    prev.isSelected === next.isSelected &&
+    prev.hidden === next.hidden &&
+    prev.layer === next.layer &&
+    prev.onChange === next.onChange &&
+    prev.onCommit === next.onCommit &&
+    prev.onEditText === next.onEditText
+  );
 });
-
-// --- Panel de propiedades ----------------------------------------------------
 
 function PropertiesPanel({
   layer,
@@ -324,7 +314,7 @@ function PropertiesPanel({
       </label>
 
       <label className="ed-field">
-        <span>Opacidad: {opacityPct}%</span>
+        <span>{t("opacity")}: {opacityPct}%</span>
         <input
           type="range"
           min="0"
@@ -365,8 +355,6 @@ function PropertiesPanel({
   );
 }
 
-// --- Componente principal ----------------------------------------------------
-
 export default function LayerEditor() {
   const t = useTranslations("editor");
   const [layers, setLayers] = useState<EditorLayer[]>([]);
@@ -381,7 +369,16 @@ export default function LayerEditor() {
   const [editing, setEditing] = useState<EditingState | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
 
-  // --- Historial (undo/redo) ---
+  // Zoom/pan: viven en refs (no en estado) para no re-renderizar al hacer zoom.
+  // Solo guardamos un "tick" para refrescar la UI (indicador de %) cuando hace falta.
+  const zoomRef = useRef(1);
+  const panRef = useRef({ x: 0, y: 0 });
+  const spacePressedRef = useRef(false);
+  const [zoomLabel, setZoomLabel] = useState(100);
+  // refs espejo para usar dentro de los listeners nativos sin dependencias
+  const fitScaleRef = useRef(1);
+  const editingRef = useRef(false);
+
   const [past, setPast] = useState<EditorLayer[][]>([]);
   const [future, setFuture] = useState<EditorLayer[][]>([]);
 
@@ -392,18 +389,15 @@ export default function LayerEditor() {
 
   const searchParams = useSearchParams();
 
-  // commit: aplica un nuevo estado de capas Y lo registra en el historial.
-  // recibe el array nuevo o una funcion (prev) => nuevo.
   const commit = useCallback(
     (updater: EditorLayer[] | ((prev: EditorLayer[]) => EditorLayer[])) => {
       setLayers((prev) => {
         const next = typeof updater === "function" ? (updater as any)(prev) : updater;
-        // guarda el estado anterior en el historial
         setPast((p) => {
           const np = [...p, prev];
           return np.length > HISTORY_LIMIT ? np.slice(np.length - HISTORY_LIMIT) : np;
         });
-        setFuture([]); // cualquier cambio nuevo invalida el redo
+        setFuture([]);
         return next;
       });
     },
@@ -439,13 +433,11 @@ export default function LayerEditor() {
   const canUndo = past.length > 0;
   const canRedo = future.length > 0;
 
-  // Atajos de teclado: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z o Ctrl+Y (redo)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
       const key = e.key.toLowerCase();
-      // no interferir si se esta escribiendo en un input/textarea
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
 
@@ -461,7 +453,175 @@ export default function LayerEditor() {
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo]);
 
-  // Carga ?project=ID al montar. (No entra en historial: es el estado inicial.)
+  // --- Zoom y pan (fuera de React): manipulan el Stage de Konva directamente ---
+  // No usan setState en cada evento, por eso no provocan re-renders del canvas.
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const ZOOM_MIN = 0.2;
+    const ZOOM_MAX = 8;
+
+    // aplica el zoom/pan actual al Stage sin pasar por React
+    const applyTransform = () => {
+      const st = stageRef.current;
+      if (!st) return;
+      const eff = fitScaleRef.current * zoomRef.current;
+      st.scale({ x: eff, y: eff });
+      st.position({ x: panRef.current.x, y: panRef.current.y });
+      st.batchDraw();
+    };
+
+    // zoom con rueda, centrado en el cursor (estilo Figma)
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const st = stageRef.current;
+      if (!st) return;
+      // si estamos editando texto, no hacemos zoom (opcion B: seguro)
+      if (editingRef.current) return;
+
+      const oldZoom = zoomRef.current;
+      const pointer = st.getPointerPosition();
+      if (!pointer) return;
+
+      const effOld = fitScaleRef.current * oldZoom;
+      // punto del "mundo" bajo el cursor antes del zoom
+      const worldX = (pointer.x - panRef.current.x) / effOld;
+      const worldY = (pointer.y - panRef.current.y) / effOld;
+
+      const direction = e.deltaY > 0 ? -1 : 1;
+      const factor = 1.08;
+      let newZoom = direction > 0 ? oldZoom * factor : oldZoom / factor;
+      newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom));
+      zoomRef.current = newZoom;
+
+      const effNew = fitScaleRef.current * newZoom;
+      // reposiciona el pan para que el punto bajo el cursor no se mueva
+      panRef.current = {
+        x: pointer.x - worldX * effNew,
+        y: pointer.y - worldY * effNew,
+      };
+
+      applyTransform();
+      setZoomLabel(Math.round(newZoom * 100));
+    };
+
+    // pan con barra espaciadora + arrastre, o boton central
+    let panning = false;
+    let lastPos = { x: 0, y: 0 };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !editingRef.current) {
+        spacePressedRef.current = true;
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") spacePressedRef.current = false;
+    };
+
+    const onMouseDown = (e: MouseEvent) => {
+      const st = stageRef.current;
+      // pan si: boton central, O espacio+izquierdo, O click izquierdo en zona VACIA
+      // (no sobre una capa). Konva nos dice que hay bajo el puntero.
+      let onEmpty = false;
+      if (st && e.button === 0 && !spacePressedRef.current) {
+        const target = st.getIntersection(st.getPointerPosition()!);
+        // si no hay nodo, o el target es el propio Stage, es zona vacia
+        onEmpty = !target || target === st;
+      }
+      if (e.button === 1 || (spacePressedRef.current && e.button === 0) || onEmpty) {
+        panning = true;
+        lastPos = { x: e.clientX, y: e.clientY };
+        // cursor de "agarrar" durante el pan
+        if (st) st.container().style.cursor = "grabbing";
+        e.preventDefault();
+      }
+    };
+    const onMouseMove = (e: MouseEvent) => {
+      if (!panning) return;
+      const dx = e.clientX - lastPos.x;
+      const dy = e.clientY - lastPos.y;
+      lastPos = { x: e.clientX, y: e.clientY };
+      panRef.current = { x: panRef.current.x + dx, y: panRef.current.y + dy };
+      applyTransform();
+    };
+    const onMouseUp = () => {
+      panning = false;
+      const st = stageRef.current;
+      if (st) st.container().style.cursor = "default";
+    };
+
+    const container = stage.container();
+    container.addEventListener("wheel", onWheel, { passive: false });
+    container.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+
+    // aplica el estado inicial
+    applyTransform();
+
+    return () => {
+      container.removeEventListener("wheel", onWheel);
+      container.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvas.width, canvas.height]);
+
+  // reset de zoom al 100% (fit)
+  const resetZoom = () => {
+    zoomRef.current = 1;
+    panRef.current = { x: 0, y: 0 };
+    const st = stageRef.current;
+    if (st) {
+      const eff = fitScaleRef.current;
+      st.scale({ x: eff, y: eff });
+      st.position({ x: 0, y: 0 });
+      st.batchDraw();
+    }
+    setZoomLabel(100);
+  };
+
+  // Aplica un zoom concreto (desde el slider o botones +/-),
+  // manteniendo centrado el punto medio del viewport visible.
+  const setZoomCentered = (newZoom: number) => {
+    const ZOOM_MIN = 0.2;
+    const ZOOM_MAX = 8;
+    newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom));
+
+    const st = stageRef.current;
+    if (!st) {
+      zoomRef.current = newZoom;
+      setZoomLabel(Math.round(newZoom * 100));
+      return;
+    }
+
+    // centro del viewport (area visible 720x540)
+    const cx = maxW / 2;
+    const cy = maxH / 2;
+
+    const oldZoom = zoomRef.current;
+    const effOld = fitScaleRef.current * oldZoom;
+    // punto del mundo en el centro antes del zoom
+    const worldX = (cx - panRef.current.x) / effOld;
+    const worldY = (cy - panRef.current.y) / effOld;
+
+    zoomRef.current = newZoom;
+    const effNew = fitScaleRef.current * newZoom;
+    // recoloca el pan para que ese punto siga en el centro
+    panRef.current = { x: cx - worldX * effNew, y: cy - worldY * effNew };
+
+    st.scale({ x: effNew, y: effNew });
+    st.position({ x: panRef.current.x, y: panRef.current.y });
+    st.batchDraw();
+    setZoomLabel(Math.round(newZoom * 100));
+  };
+
   useEffect(() => {
     const projectId = searchParams.get("project");
     if (!projectId) return;
@@ -604,8 +764,8 @@ export default function LayerEditor() {
           file: null,
           visible: true,
           opacity: 1,
-          x: 0,
-          y: 0,
+          x: cl.x ?? 0,
+          y: cl.y ?? 0,
           rotation: 0,
           scaleX: 1,
           scaleY: 1,
@@ -638,13 +798,11 @@ export default function LayerEditor() {
     else addImage(file);
   };
 
-  // cambio intermedio (sin historial): durante arrastre o slider
-  const updateLayer = (updated: EditorLayer) =>
-    setLayers((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+  const updateLayer = useCallback((updated: EditorLayer) =>
+    setLayers((prev) => prev.map((l) => (l.id === updated.id ? updated : l))), []);
 
-  // cambio final (con historial)
-  const commitLayer = (updated: EditorLayer) =>
-    commit((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+  const commitLayer = useCallback((updated: EditorLayer) =>
+    commit((prev) => prev.map((l) => (l.id === updated.id ? updated : l))), [commit]);
 
   const toggleVisible = (id: string) =>
     commit((prev) => prev.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l)));
@@ -702,8 +860,20 @@ export default function LayerEditor() {
     setTimeout(() => startEditing(newLayer), 0);
   };
 
-  const startEditing = (layer: EditorLayer) => {
-    const scale = currentScale();
+  const startEditing = useCallback((layer: EditorLayer) => {
+    // Opcion B: al editar texto, reseteamos zoom/pan a fit para que el
+    // textarea superpuesto cuadre con coordenadas simples.
+    zoomRef.current = 1;
+    panRef.current = { x: 0, y: 0 };
+    const st = stageRef.current;
+    if (st) {
+      const fit = Math.min(720 / canvas.width, 540 / canvas.height, 1);
+      st.scale({ x: fit, y: fit });
+      st.position({ x: 0, y: 0 });
+      st.batchDraw();
+    }
+    setZoomLabel(100);
+    const scale = Math.min(720 / canvas.width, 540 / canvas.height, 1);
     setEditing({
       id: layer.id,
       value: layer.text || "",
@@ -716,7 +886,7 @@ export default function LayerEditor() {
         transformOrigin: "left top",
       },
     });
-  };
+  }, [canvas.width, canvas.height]);
 
   const commitEditing = () => {
     if (!editing) return;
@@ -794,7 +964,7 @@ export default function LayerEditor() {
       .filter((l) => l.visible)
       .map((l) => {
         const op = (l.opacity ?? 1) < 1 ? ` opacity="${l.opacity}"` : "";
-        const t = `translate(${l.x} ${l.y}) rotate(${l.rotation}) scale(${l.scaleX} ${l.scaleY})`;
+        const tr = `translate(${l.x} ${l.y}) rotate(${l.rotation}) scale(${l.scaleX} ${l.scaleY})`;
 
         if (l.type === "text") {
           const lines = (l.text || "").split("\n");
@@ -803,19 +973,19 @@ export default function LayerEditor() {
               `<tspan x="0" dy="${i === 0 ? l.fontSize : (l.fontSize || 48) * 1.3}">${esc(ln)}</tspan>`
             )
             .join("");
-          return `<g transform="${t}"${op}><text font-family="DM Sans, sans-serif" font-size="${l.fontSize}" fill="${l.fill}">${tspans}</text></g>`;
+          return `<g transform="${tr}"${op}><text font-family="DM Sans, sans-serif" font-size="${l.fontSize}" fill="${l.fill}">${tspans}</text></g>`;
         }
 
         if (l.svg) {
           const inner = l.svg.replace(/^<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "");
-          return `<g transform="${t}"${op}>${inner}</g>`;
+          return `<g transform="${tr}"${op}>${inner}</g>`;
         }
 
         if (l.img) {
           const w = l.img.width;
           const h = l.img.height;
           const href = imageToDataUrl(l.img, w, h);
-          return `<g transform="${t}"${op}><image width="${w}" height="${h}" href="${href}"/></g>`;
+          return `<g transform="${tr}"${op}><image width="${w}" height="${h}" href="${href}"/></g>`;
         }
 
         return "";
@@ -837,13 +1007,19 @@ export default function LayerEditor() {
 
   const maxW = 720;
   const maxH = 540;
-  const currentScale = () => Math.min(maxW / canvas.width, maxH / canvas.height, 1);
-  const scale = currentScale();
+  // scale base: encaja la imagen en el area visible (es el zoom 100% "fit")
+  const fitScale = Math.min(maxW / canvas.width, maxH / canvas.height, 1);
+  // el scale efectivo es el fit * el zoom del usuario
+  const scale = fitScale * zoomRef.current;
 
   const hasContent = layers.length > 0;
   const editingLayer = editing ? layers.find((l) => l.id === editing.id) : null;
   const selectedLayer = layers.find((l) => l.id === selectedId);
   const canSplit = selectedLayer && selectedLayer.type === "image" && selectedLayer.file;
+
+  // sincroniza refs espejo (para los listeners nativos de zoom/pan)
+  fitScaleRef.current = fitScale;
+  editingRef.current = !!editing;
 
   return (
     <div className="ed-root">
@@ -860,6 +1036,10 @@ export default function LayerEditor() {
         </button>
         <button className="ed-icon-btn" onClick={redo} disabled={!canRedo} title={t("redo")}>
           <Redo2 size={16} />
+        </button>
+
+        <button className="ed-zoom-btn" onClick={resetZoom} title="Restablecer zoom">
+          {zoomLabel}%
         </button>
 
         <button className="ed-btn" onClick={() => fileRef.current?.click()}>
@@ -925,15 +1105,14 @@ export default function LayerEditor() {
             <>
               <div
                 className="ed-stage-frame"
-                style={{ width: canvas.width * scale, height: canvas.height * scale, position: "relative" }}
+                style={{ width: maxW, height: maxH, position: "relative" }}
               >
                 <Stage
                   ref={stageRef}
-                  width={canvas.width}
-                  height={canvas.height}
+                  width={maxW}
+                  height={maxH}
                   scaleX={scale}
                   scaleY={scale}
-                  style={{ width: canvas.width * scale, height: canvas.height * scale }}
                 >
                   <Layer>
                     {layers.map((l) => (
@@ -973,6 +1152,36 @@ export default function LayerEditor() {
                 )}
               </div>
               {error && <p className="ed-error ed-error-float">{error}</p>}
+
+              {/* Control de zoom flotante (estilo Canva) */}
+              <div className="ed-zoom-bar">
+                <button
+                  className="ed-zoom-ctrl"
+                  onClick={() => setZoomCentered(zoomRef.current / 1.2)}
+                  title="Alejar"
+                >
+                  &minus;
+                </button>
+                <input
+                  className="ed-zoom-slider"
+                  type="range"
+                  min={20}
+                  max={800}
+                  value={zoomLabel}
+                  onChange={(e) => setZoomCentered(Number(e.target.value) / 100)}
+                />
+                <button
+                  className="ed-zoom-ctrl"
+                  onClick={() => setZoomCentered(zoomRef.current * 1.2)}
+                  title="Acercar"
+                >
+                  +
+                </button>
+                <span className="ed-zoom-pct">{zoomLabel}%</span>
+                <button className="ed-zoom-fit" onClick={resetZoom} title="Ajustar a pantalla">
+                  Ajustar
+                </button>
+              </div>
             </>
           )}
         </main>
@@ -1127,6 +1336,26 @@ const styles = `
     width:34px; height:34px; border-radius:8px; cursor:pointer; }
   .ed-icon-btn:hover:not(:disabled) { background:#23262f; }
   .ed-icon-btn:disabled { opacity:.35; cursor:not-allowed; }
+  .ed-zoom-btn { background:transparent; color:var(--muted); border:0;
+    box-shadow:inset 0 0 0 1px var(--line); height:34px; padding:0 10px;
+    border-radius:8px; cursor:pointer; font-size:12px; font-family:'JetBrains Mono',monospace;
+    min-width:54px; }
+  .ed-zoom-btn:hover { background:#23262f; color:var(--txt); }
+  .ed-zoom-bar { position:absolute; bottom:16px; left:50%; transform:translateX(-50%);
+    display:flex; align-items:center; gap:8px; background:var(--panel);
+    border:1px solid var(--line); border-radius:10px; padding:6px 10px;
+    box-shadow:0 4px 16px rgba(0,0,0,.35); z-index:5; }
+  .ed-zoom-ctrl { background:transparent; border:0; color:var(--txt); cursor:pointer;
+    width:24px; height:24px; border-radius:6px; font-size:16px; line-height:1;
+    display:flex; align-items:center; justify-content:center; }
+  .ed-zoom-ctrl:hover { background:#23262f; color:var(--accent); }
+  .ed-zoom-slider { width:140px; accent-color:var(--accent); cursor:pointer; }
+  .ed-zoom-pct { font-size:12px; color:var(--muted); font-family:'JetBrains Mono',monospace;
+    min-width:42px; text-align:right; }
+  .ed-zoom-fit { background:transparent; border:0; box-shadow:inset 0 0 0 1px var(--line);
+    color:var(--txt); cursor:pointer; font-size:12px; padding:4px 10px; border-radius:6px;
+    font-family:inherit; }
+  .ed-zoom-fit:hover { background:#23262f; color:var(--accent); }
   .ed-body { display:flex; flex:1; min-height:0; }
   .ed-canvas-wrap { flex:1; position:relative; display:flex; align-items:center;
     justify-content:center; padding:24px; background:

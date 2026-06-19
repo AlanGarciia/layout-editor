@@ -254,3 +254,13 @@ html, body {
   background: #2a3a35;
   color: #4d9d84;
 }
+.lf-nav-logo {
+  height: 28px;
+  width: auto;
+  display: block;
+}
+.lf-nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

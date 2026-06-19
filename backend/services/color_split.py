@@ -12,7 +12,12 @@ para no acabar con demasiadas capas. Tres controles:
 
 El resultado: menos capas, mas limpias, y procesado mas ligero en el front.
 
-Cada capa cubre el lienzo completo (mismas dimensiones que el original).
+RENDIMIENTO: cada capa se RECORTA a su bounding box (el rectangulo minimo que
+contiene sus pixeles) y se devuelve con su posicion (x, y). Asi, una capa que
+solo tiene color en una zona no ocupa el lienzo entero: el front dibuja
+imagenes pequenas en su sitio en vez de imagenes del tamano completo. Esto
+quita los tirones al mover capas con imagenes grandes.
+
 Requiere NumPy (pip install numpy).
 """
 
@@ -44,7 +49,8 @@ def split_by_color(
 ) -> Dict:
     """
     Separa la imagen en capas por color, agrupando colores parecidos.
-    Devuelve { width, height, layers: [{name, hex, pixels, png}, ...] }.
+    Devuelve { width, height, layers: [{name, hex, pixels, png, x, y, w, h}, ...] }.
+    Cada capa viene RECORTADA a su bounding box; (x, y) es su posicion en el lienzo.
     """
     n_colors = max(2, min(64, int(n_colors)))
 
@@ -84,8 +90,6 @@ def split_by_color(
     total_visible = sum(i["count"] for i in infos) or 1
 
     # --- Paso 1: fusionar colores parecidos (merge_dist) ---
-    # Agrupamos indices en "clusters" cuyos colores estan a < merge_dist.
-    # Cada cluster se queda con el color del miembro mas grande.
     infos.sort(key=lambda i: i["count"], reverse=True)
     clusters = []  # cada cluster: { rgb, count, members:set(idx) }
 
@@ -105,13 +109,11 @@ def split_by_color(
             })
 
     # --- Paso 2: descartar clusters pequenos (min_percent) ---
-    # Los que no llegan al minimo se fusionan con el cluster superviviente
-    # de color mas cercano.
     min_pixels = (min_percent / 100.0) * total_visible
     big = [c for c in clusters if c["count"] >= min_pixels]
     small = [c for c in clusters if c["count"] < min_pixels]
 
-    if not big:  # por si todo es pequeno, nos quedamos con el mayor
+    if not big:
         big = [max(clusters, key=lambda c: c["count"])]
         small = [c for c in clusters if c not in big]
 
@@ -120,7 +122,7 @@ def split_by_color(
         nearest["members"] |= sc["members"]
         nearest["count"] += sc["count"]
 
-    # --- Paso 3: construir una capa por cluster superviviente ---
+    # --- Paso 3: construir una capa por cluster, RECORTADA a su bounding box ---
     layers: List[Dict] = []
     for cl in big:
         r, g, b = cl["rgb"]
@@ -132,11 +134,24 @@ def split_by_color(
         if count == 0:
             continue
 
-        layer_arr = np.zeros((h, w, 4), dtype=np.uint8)
-        layer_arr[member_mask, 0] = r
-        layer_arr[member_mask, 1] = g
-        layer_arr[member_mask, 2] = b
-        layer_arr[member_mask, 3] = alpha[member_mask]
+        # --- bounding box de la mascara ---
+        rows = np.any(member_mask, axis=1)
+        cols = np.any(member_mask, axis=0)
+        ymin, ymax = np.where(rows)[0][[0, -1]]
+        xmin, xmax = np.where(cols)[0][[0, -1]]
+        bw = int(xmax - xmin + 1)
+        bh = int(ymax - ymin + 1)
+
+        # recorta la mascara y el alpha al bounding box
+        sub_mask = member_mask[ymin:ymax + 1, xmin:xmax + 1]
+        sub_alpha = alpha[ymin:ymax + 1, xmin:xmax + 1]
+
+        # construye solo la imagen recortada (bw x bh), no el lienzo entero
+        layer_arr = np.zeros((bh, bw, 4), dtype=np.uint8)
+        layer_arr[sub_mask, 0] = r
+        layer_arr[sub_mask, 1] = g
+        layer_arr[sub_mask, 2] = b
+        layer_arr[sub_mask, 3] = sub_alpha[sub_mask]
 
         layer_img = Image.fromarray(layer_arr, mode="RGBA")
 
@@ -145,6 +160,10 @@ def split_by_color(
             "hex": hex_color,
             "pixels": count,
             "png": _to_data_url(layer_img),
+            "x": int(xmin),
+            "y": int(ymin),
+            "w": bw,
+            "h": bh,
         })
 
     layers.sort(key=lambda l: l["pixels"], reverse=True)

@@ -13,6 +13,10 @@ interface ColorLayer {
   hex: string;
   png: string;
   pixels: number;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
 }
 
 interface LayersResult {
@@ -80,8 +84,8 @@ export default function ToolRunner({ tool }: { tool: ToolConfig }) {
         file: null,
         visible: true,
         opacity: 1,
-        x: 0,
-        y: 0,
+        x: (cl as any).x ?? 0,
+        y: (cl as any).y ?? 0,
         rotation: 0,
         scaleX: 1,
         scaleY: 1,

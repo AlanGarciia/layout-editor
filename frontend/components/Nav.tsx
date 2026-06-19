@@ -29,7 +29,9 @@ export default function Nav() {
   return (
     <nav className="lf-nav">
       <Link href="/" className="lf-nav-brand">
-        {t("brand")}
+        {/* Logo. Si tu logo YA incluye el texto "LayersWork", borra el <span> de abajo. */}
+        <img src="/logo-symbol.png" alt="LayersWork" className="lf-nav-logo" />
+        <span>{t("brand")}</span>
       </Link>
       <div className="lf-nav-links">
         {links.map((l) => {
