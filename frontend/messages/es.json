@@ -3,7 +3,9 @@
     "brand": "LayersWork",
     "home": "Inicio",
     "editor": "Editor",
-    "optimizer": "Optimizer"
+    "optimizer": "Optimizer",
+    "removeBg": "Quitar fondo",
+    "converters": "Conversores"
   },
   "home": {
     "badge": "Editor de capas online",
@@ -13,6 +15,8 @@
     "optimizeImages": "Optimizar imagenes",
     "toolsTitle": "Herramientas",
     "toolsSubtitle": "Cada herramienta funciona sola, sin registro. Pruebala y descarga el resultado.",
+    "convertersTitle": "Conversores",
+    "convertersSubtitle": "Convierte entre formatos de imagen en segundos. Gratis y sin registro.",
     "tryIt": "Probar ->"
   },
   "footer": {
@@ -29,6 +33,16 @@
       "title": "Convertir PNG a PSD con capas online",
       "description": "Sube un PNG y descargalo como archivo PSD de Photoshop con capas. Gratis, sin marca de agua.",
       "intro": "Convierte tu PNG en un PSD editable manteniendo las capas. Sin instalar nada."
+    },
+    "remove-background": {
+      "title": "Quitar fondo de imagen online",
+      "description": "Elimina el fondo de cualquier imagen automaticamente con IA. Obten un PNG transparente y limpio en segundos. Gratis, sin registro y sin marca de agua.",
+      "intro": "Sube una imagen y deja que la IA elimine el fondo al instante. Perfecto para fotos de producto, retratos y logos."
+    },
+    "heic-to-jpg": {
+      "title": "Convertir HEIC a JPG online",
+      "description": "Convierte fotos HEIC de iPhone a JPG en segundos. Gratis, sin registro y desde tu navegador.",
+      "intro": "Sube un archivo HEIC de tu iPhone y descargalo como JPG estandar. Perfecto para compartir o subir a cualquier sitio."
     }
   },
   "landing": {
@@ -73,7 +87,8 @@
     "rename": "Doble clic para renombrar",
     "reorder": "Arrastra para reordenar",
     "defaultText": "Escribe aqui",
-    "textLayer": "Texto"
+    "textLayer": "Texto",
+    "duplicate": "Duplicar"
   },
   "optimizer": {
     "title": "Design Compressor + Optimizer",

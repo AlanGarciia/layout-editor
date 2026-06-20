@@ -2,20 +2,32 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# dependencias del sistema (Pillow, etc. funcionan con estas)
+# dependencias del sistema (Pillow, onnxruntime, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libjpeg-dev zlib1g-dev libpng-dev \
+    libjpeg-dev zlib1g-dev libpng-dev libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # instalar dependencias Python primero (cache)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-descarga del modelo de rembg (u2net) en el BUILD, no en la primera peticion.
+# Asi el primer usuario que quite un fondo no espera los ~170MB de descarga.
+# El modelo queda cacheado dentro de la imagen.
+RUN python -c "from rembg import new_session; new_session('u2net')"
+
 # copiar el codigo
 COPY . .
 
 # usuario sin privilegios
 RUN useradd -m appuser && chown -R appuser /app
+
+# el cache del modelo se descargo como root; lo movemos al home del appuser
+# (rembg cachea en ~/.u2net por defecto)
+RUN mkdir -p /home/appuser/.u2net && \
+    if [ -d /root/.u2net ]; then cp -r /root/.u2net/* /home/appuser/.u2net/ 2>/dev/null || true; fi && \
+    chown -R appuser /home/appuser/.u2net
+
 USER appuser
 
 EXPOSE 8000

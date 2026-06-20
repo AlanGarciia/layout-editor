@@ -3,7 +3,9 @@
     "brand": "LayersWork",
     "home": "Home",
     "editor": "Editor",
-    "optimizer": "Optimizer"
+    "optimizer": "Optimizer",
+    "removeBg": "Remove background",
+    "converters": "Converters"
   },
   "home": {
     "badge": "Online layer editor",
@@ -13,6 +15,8 @@
     "optimizeImages": "Optimize images",
     "toolsTitle": "Tools",
     "toolsSubtitle": "Each tool works on its own, no signup. Try it and download the result.",
+    "convertersTitle": "Converters",
+    "convertersSubtitle": "Convert between image formats in seconds. Free and no signup.",
     "tryIt": "Try it ->"
   },
   "footer": {
@@ -29,6 +33,16 @@
       "title": "Convert PNG to PSD with layers online",
       "description": "Upload a PNG and download it as a Photoshop PSD file with layers. Free, no watermark.",
       "intro": "Convert your PNG into an editable PSD keeping the layers. Nothing to install."
+    },
+    "remove-background": {
+      "title": "Remove image background online",
+      "description": "Remove the background from any image automatically with AI. Get a clean transparent PNG in seconds. Free, no signup, no watermark.",
+      "intro": "Upload an image and let AI remove the background instantly. Perfect for product photos, portraits and logos."
+    },
+    "heic-to-jpg": {
+      "title": "Convert HEIC to JPG online",
+      "description": "Convert iPhone HEIC photos to JPG in seconds. Free, no signup, works in your browser.",
+      "intro": "Upload a HEIC file from your iPhone and download it as a standard JPG. Perfect for sharing or uploading anywhere."
     }
   },
   "landing": {
@@ -73,7 +87,9 @@
     "rename": "Double click to rename",
     "reorder": "Drag to reorder",
     "defaultText": "Type here",
-    "textLayer": "Text"
+    "textLayer": "Text",
+    "duplicate": "Duplicate"
+    
   },
   "optimizer": {
     "title": "Design Compressor + Optimizer",

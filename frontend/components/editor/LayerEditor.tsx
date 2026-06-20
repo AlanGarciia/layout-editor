@@ -2,12 +2,15 @@
 
 import { useState, useRef, useEffect, useCallback, memo } from "react";
 import { useSearchParams } from "next/navigation";
+import NewProjectScreen, { type CanvasChoice } from "./NewProjectScreen";
 import { useTranslations } from "next-intl";
-import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Transformer } from "react-konva";
+import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Transformer, Rect } from "react-konva";
 import {
   Upload, Eye, EyeOff, Trash2, Layers, ChevronDown, ChevronRight, Download,
   ArrowUp, ArrowDown, Type, GripVertical, FileCode, ImagePlus, Blend, Settings2,
-  Undo2, Redo2,
+  Undo2, Redo2, Copy,
+  AlignStartVertical, AlignCenterVertical, AlignEndVertical,
+  AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -359,6 +362,17 @@ export default function LayerEditor() {
   const t = useTranslations("editor");
   const [layers, setLayers] = useState<EditorLayer[]>([]);
   const [canvas, setCanvas] = useState<CanvasSize>({ width: 800, height: 600 });
+  // lienzo elegido en la pantalla de nuevo proyecto (null = aun no elegido)
+  const [canvasChoice, setCanvasChoice] = useState<CanvasChoice | null>(null);
+  const canvasMode = canvasChoice?.mode ?? "free";
+
+  // al elegir lienzo en la pantalla de nuevo proyecto
+  const handleCreateCanvas = (choice: CanvasChoice) => {
+    setCanvasChoice(choice);
+    if (choice.mode === "fixed") {
+      setCanvas({ width: choice.width, height: choice.height });
+    }
+  };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -435,11 +449,20 @@ export default function LayerEditor() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
-      const key = e.key.toLowerCase();
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+      const key = e.key.toLowerCase();
+      const mod = e.ctrlKey || e.metaKey;
+
+      // Supr / Backspace: borrar la capa seleccionada (sin Ctrl)
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
+        e.preventDefault();
+        removeLayer(selectedId);
+        return;
+      }
+
+      if (!mod) return;
 
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
@@ -447,17 +470,30 @@ export default function LayerEditor() {
       } else if ((key === "z" && e.shiftKey) || key === "y") {
         e.preventDefault();
         redo();
+      } else if (key === "d" && selectedId) {
+        e.preventDefault();
+        duplicateLayer(selectedId);
+      } else if (key === "c" && selectedId) {
+        e.preventDefault();
+        copyLayer(selectedId);
+      } else if (key === "v") {
+        e.preventDefault();
+        pasteLayer();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [undo, redo, selectedId, layers]);
 
   // --- Zoom y pan (fuera de React): manipulan el Stage de Konva directamente ---
   // No usan setState en cada evento, por eso no provocan re-renders del canvas.
   useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage) return;
+    // El Stage de Konva puede no estar montado en el primer render tras
+    // elegir lienzo. Reintentamos en el siguiente frame hasta que exista,
+    // asi el zoom/pan se engancha siempre (sin depender del timing exacto).
+    let rafId = 0;
+    let detach: (() => void) | null = null;
 
     const ZOOM_MIN = 0.2;
     const ZOOM_MAX = 8;
@@ -551,27 +587,43 @@ export default function LayerEditor() {
       if (st) st.container().style.cursor = "default";
     };
 
-    const container = stage.container();
-    container.addEventListener("wheel", onWheel, { passive: false });
-    container.addEventListener("mousedown", onMouseDown);
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
+    // engancha los listeners a un stage concreto, devuelve la funcion de limpieza
+    const attach = (stage: any) => {
+      const container = stage.container();
+      container.addEventListener("wheel", onWheel, { passive: false });
+      container.addEventListener("mousedown", onMouseDown);
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+      window.addEventListener("keydown", onKeyDown);
+      window.addEventListener("keyup", onKeyUp);
+      applyTransform();
+      return () => {
+        container.removeEventListener("wheel", onWheel);
+        container.removeEventListener("mousedown", onMouseDown);
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+        window.removeEventListener("keydown", onKeyDown);
+        window.removeEventListener("keyup", onKeyUp);
+      };
+    };
 
-    // aplica el estado inicial
-    applyTransform();
+    // reintenta hasta que el Stage exista (puede no estar en el primer frame)
+    const trySetup = () => {
+      const st = stageRef.current;
+      if (!st) {
+        rafId = requestAnimationFrame(trySetup);
+        return;
+      }
+      detach = attach(st);
+    };
+    trySetup();
 
     return () => {
-      container.removeEventListener("wheel", onWheel);
-      container.removeEventListener("mousedown", onMouseDown);
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
+      if (rafId) cancelAnimationFrame(rafId);
+      if (detach) detach();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvas.width, canvas.height]);
+  }, [canvas.width, canvas.height, canvasChoice]);
 
   // reset de zoom al 100% (fit)
   const resetZoom = () => {
@@ -625,6 +677,8 @@ export default function LayerEditor() {
   useEffect(() => {
     const projectId = searchParams.get("project");
     if (!projectId) return;
+    // si viene un proyecto, saltamos la pantalla de nuevo proyecto
+    setCanvasChoice({ mode: "free", width: 800, height: 600, label: "Proyecto" });
 
     (async () => {
       setLoading(true);
@@ -810,6 +864,81 @@ export default function LayerEditor() {
   const removeLayer = (id: string) => {
     commit((prev) => prev.filter((l) => l.id !== id));
     if (selectedId === id) setSelectedId(null);
+  };
+
+  // duplica una capa con un pequeno desplazamiento, y selecciona la copia
+  const duplicateLayer = (id: string) => {
+    const orig = layers.find((l) => l.id === id);
+    if (!orig) return;
+    const copy: EditorLayer = {
+      ...orig,
+      id: `layer-${Date.now()}`,
+      name: `${orig.name} copia`,
+      x: (orig.x ?? 0) + 16,
+      y: (orig.y ?? 0) + 16,
+    };
+    commit((prev) => {
+      const i = prev.findIndex((l) => l.id === id);
+      const next = [...prev];
+      next.splice(i + 1, 0, copy); // inserta justo encima del original
+      return next;
+    });
+    setSelectedId(copy.id);
+  };
+
+  // portapapeles interno (no usa el del sistema, es para capas)
+  const clipboardRef = useRef<EditorLayer | null>(null);
+
+  const copyLayer = (id: string) => {
+    const l = layers.find((x) => x.id === id);
+    if (l) clipboardRef.current = l;
+  };
+
+  const pasteLayer = () => {
+    const src = clipboardRef.current;
+    if (!src) return;
+    const copy: EditorLayer = {
+      ...src,
+      id: `layer-${Date.now()}`,
+      name: `${src.name} copia`,
+      x: (src.x ?? 0) + 16,
+      y: (src.y ?? 0) + 16,
+    };
+    commit((prev) => [...prev, copy]);
+    setSelectedId(copy.id);
+  };
+
+  // tamano renderizado de una capa (ancho/alto en px del lienzo)
+  const layerSize = (l: EditorLayer): { w: number; h: number } => {
+    if (l.img) {
+      return {
+        w: l.img.width * (l.scaleX ?? 1),
+        h: l.img.height * (l.scaleY ?? 1),
+      };
+    }
+    // texto u otros: aproximacion por fontSize (suficiente para alinear)
+    const fs = l.fontSize ?? 32;
+    const textLen = (l.text ?? "").length || 4;
+    return { w: fs * 0.6 * textLen * (l.scaleX ?? 1), h: fs * 1.2 * (l.scaleY ?? 1) };
+  };
+
+  // alinea la capa seleccionada respecto al lienzo
+  type AlignKind = "left" | "hcenter" | "right" | "top" | "vcenter" | "bottom";
+  const alignLayer = (kind: AlignKind) => {
+    if (!selectedId) return;
+    const l = layers.find((x) => x.id === selectedId);
+    if (!l) return;
+    const { w, h } = layerSize(l);
+    const next = { ...l };
+    switch (kind) {
+      case "left":    next.x = 0; break;
+      case "hcenter": next.x = (canvas.width - w) / 2; break;
+      case "right":   next.x = canvas.width - w; break;
+      case "top":     next.y = 0; break;
+      case "vcenter": next.y = (canvas.height - h) / 2; break;
+      case "bottom":  next.y = canvas.height - h; break;
+    }
+    commitLayer(next);
   };
 
   const moveLayer = (id: string, dir: number) => {
@@ -1021,6 +1150,17 @@ export default function LayerEditor() {
   fitScaleRef.current = fitScale;
   editingRef.current = !!editing;
 
+  // si aun no se ha elegido lienzo (y no viene un proyecto), mostrar la
+  // pantalla de nuevo proyecto antes del editor
+  if (!canvasChoice) {
+    return (
+      <div className="ed-root">
+        <style>{styles}</style>
+        <NewProjectScreen onCreate={handleCreateCanvas} />
+      </div>
+    );
+  }
+
   return (
     <div className="ed-root">
       <style>{styles}</style>
@@ -1088,7 +1228,7 @@ export default function LayerEditor() {
 
       <div className="ed-body">
         <main className="ed-canvas-wrap" onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
-          {!hasContent ? (
+          {!hasContent && canvasMode !== "fixed" ? (
             <div className="ed-empty">
               {loading ? (
                 <p>{t("processing")}</p>
@@ -1115,6 +1255,20 @@ export default function LayerEditor() {
                   scaleY={scale}
                 >
                   <Layer>
+                    {/* lienzo (papel) en modo fijo: fondo blanco del tamano elegido */}
+                    {canvasMode === "fixed" && (
+                      <Rect
+                        x={0}
+                        y={0}
+                        width={canvas.width}
+                        height={canvas.height}
+                        fill="#ffffff"
+                        listening={false}
+                        shadowColor="rgba(0,0,0,0.3)"
+                        shadowBlur={12}
+                        shadowOpacity={0.25}
+                      />
+                    )}
                     {layers.map((l) => (
                       <CanvasLayer
                         key={l.id}
@@ -1154,6 +1308,30 @@ export default function LayerEditor() {
               {error && <p className="ed-error ed-error-float">{error}</p>}
 
               {/* Control de zoom flotante (estilo Canva) */}
+              {selectedId && (
+                <div className="ed-align-bar">
+                  <button className="ed-align-btn" onClick={() => alignLayer("left")} title="Alinear izquierda">
+                    <AlignStartVertical size={15} />
+                  </button>
+                  <button className="ed-align-btn" onClick={() => alignLayer("hcenter")} title="Centrar horizontal">
+                    <AlignCenterVertical size={15} />
+                  </button>
+                  <button className="ed-align-btn" onClick={() => alignLayer("right")} title="Alinear derecha">
+                    <AlignEndVertical size={15} />
+                  </button>
+                  <span className="ed-align-sep" />
+                  <button className="ed-align-btn" onClick={() => alignLayer("top")} title="Alinear arriba">
+                    <AlignStartHorizontal size={15} />
+                  </button>
+                  <button className="ed-align-btn" onClick={() => alignLayer("vcenter")} title="Centrar vertical">
+                    <AlignCenterHorizontal size={15} />
+                  </button>
+                  <button className="ed-align-btn" onClick={() => alignLayer("bottom")} title="Alinear abajo">
+                    <AlignEndHorizontal size={15} />
+                  </button>
+                </div>
+              )}
+
               <div className="ed-zoom-bar">
                 <button
                   className="ed-zoom-ctrl"
@@ -1290,6 +1468,16 @@ export default function LayerEditor() {
                       <ArrowDown size={14} />
                     </button>
                     <button
+                      className="ed-icon"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        duplicateLayer(l.id);
+                      }}
+                      title={t("duplicate")}
+                    >
+                      <Copy size={14} />
+                    </button>
+                    <button
                       className="ed-icon ed-icon-del"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1341,6 +1529,15 @@ const styles = `
     border-radius:8px; cursor:pointer; font-size:12px; font-family:'JetBrains Mono',monospace;
     min-width:54px; }
   .ed-zoom-btn:hover { background:#23262f; color:var(--txt); }
+  .ed-align-bar { position:absolute; top:16px; left:50%; transform:translateX(-50%);
+    display:flex; align-items:center; gap:4px; background:var(--panel);
+    border:1px solid var(--line); border-radius:10px; padding:5px 8px;
+    box-shadow:0 4px 16px rgba(0,0,0,.35); z-index:5; }
+  .ed-align-btn { background:transparent; border:0; color:var(--txt); cursor:pointer;
+    width:30px; height:30px; border-radius:7px; display:flex; align-items:center;
+    justify-content:center; }
+  .ed-align-btn:hover { background:#23262f; color:var(--accent); }
+  .ed-align-sep { width:1px; height:20px; background:var(--line); margin:0 3px; }
   .ed-zoom-bar { position:absolute; bottom:16px; left:50%; transform:translateX(-50%);
     display:flex; align-items:center; gap:8px; background:var(--panel);
     border:1px solid var(--line); border-radius:10px; padding:6px 10px;

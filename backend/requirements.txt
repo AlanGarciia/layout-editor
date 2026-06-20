@@ -5,3 +5,5 @@ psd-tools
 pillow
 numpy
 scour
+rembg
+onnxruntime
