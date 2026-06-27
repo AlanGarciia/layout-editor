@@ -204,9 +204,10 @@ interface CanvasLayerProps {
   onCommit: (l: EditorLayer) => void;
   onEditText: (l: EditorLayer) => void;
   hidden: boolean;
+  clampBounds?: { width: number; height: number } | null; // si existe, limita la capa al lienzo
 }
 
-const CanvasLayer = memo(function CanvasLayer({ layer, isSelected, onChange, onCommit, onEditText, hidden }: CanvasLayerProps) {
+const CanvasLayer = memo(function CanvasLayer({ layer, isSelected, onChange, onCommit, onEditText, hidden, clampBounds }: CanvasLayerProps) {
   const ref = useRef<any>(null);
   const trRef = useRef<any>(null);
 
@@ -232,6 +233,27 @@ const CanvasLayer = memo(function CanvasLayer({ layer, isSelected, onChange, onC
     perfectDrawEnabled: false,
     shadowForStrokeEnabled: false,
     onDragEnd: (e: any) => onCommit({ ...layer, x: e.target.x(), y: e.target.y() }),
+    dragBoundFunc: clampBounds
+      ? function (this: any, pos: { x: number; y: number }) {
+          // 'this' es el nodo Konva. Trabajamos en coords del lienzo.
+          const node = this;
+          const stage = node.getStage();
+          if (!stage) return pos;
+          const scale = stage.scaleX() || 1;
+          const sp = stage.position();
+          // pos pantalla -> pos lienzo
+          const lx = (pos.x - sp.x) / scale;
+          const ly = (pos.y - sp.y) / scale;
+          // tamano de la capa en coords de lienzo
+          const w = node.width() * node.scaleX();
+          const h = node.height() * node.scaleY();
+          // limitar para que la capa no salga del lienzo
+          const cx = Math.max(0, Math.min(lx, clampBounds.width - w));
+          const cy = Math.max(0, Math.min(ly, clampBounds.height - h));
+          // volver a coords pantalla
+          return { x: cx * scale + sp.x, y: cy * scale + sp.y };
+        }
+      : undefined,
     onTransformEnd: () => {
       const node = ref.current;
       onCommit({
@@ -279,7 +301,9 @@ const CanvasLayer = memo(function CanvasLayer({ layer, isSelected, onChange, onC
     prev.layer === next.layer &&
     prev.onChange === next.onChange &&
     prev.onCommit === next.onCommit &&
-    prev.onEditText === next.onEditText
+    prev.onEditText === next.onEditText &&
+    prev.clampBounds?.width === next.clampBounds?.width &&
+    prev.clampBounds?.height === next.clampBounds?.height
   );
 });
 
@@ -377,6 +401,9 @@ export default function LayerEditor() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exportScale, setExportScale] = useState(1); // 1x, 2x, 3x
+  const exportMenuRef = useRef<HTMLDivElement>(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -392,6 +419,9 @@ export default function LayerEditor() {
   // refs espejo para usar dentro de los listeners nativos sin dependencias
   const fitScaleRef = useRef(1);
   const editingRef = useRef(false);
+  const canvasModeRef = useRef<"fixed" | "free">("free");
+  // offset (en px de pantalla) para centrar el lienzo dentro del viewport al zoom base
+  const centerOffsetRef = useRef({ x: 0, y: 0 });
 
   const [past, setPast] = useState<EditorLayer[][]>([]);
   const [future, setFuture] = useState<EditorLayer[][]>([]);
@@ -462,6 +492,13 @@ export default function LayerEditor() {
         return;
       }
 
+      // Escape: deseleccionar la capa actual
+      if (e.key === "Escape" && selectedId) {
+        e.preventDefault();
+        setSelectedId(null);
+        return;
+      }
+
       if (!mod) return;
 
       if (key === "z" && !e.shiftKey) {
@@ -473,13 +510,9 @@ export default function LayerEditor() {
       } else if (key === "d" && selectedId) {
         e.preventDefault();
         duplicateLayer(selectedId);
-      } else if (key === "c" && selectedId) {
-        e.preventDefault();
-        copyLayer(selectedId);
-      } else if (key === "v") {
-        e.preventDefault();
-        pasteLayer();
       }
+      // Ctrl+V pega imagen del portapapeles del sistema (ver listener 'paste').
+      // Para duplicar una capa interna se usa Ctrl+D.
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -495,7 +528,8 @@ export default function LayerEditor() {
     let rafId = 0;
     let detach: (() => void) | null = null;
 
-    const ZOOM_MIN = 0.2;
+    // en modo fijo no puedes alejarte mas alla de ver el lienzo entero (min=1)
+    const ZOOM_MIN = canvasModeRef.current === "fixed" ? 1 : 0.2;
     const ZOOM_MAX = 8;
 
     // aplica el zoom/pan actual al Stage sin pasar por React
@@ -504,7 +538,11 @@ export default function LayerEditor() {
       if (!st) return;
       const eff = fitScaleRef.current * zoomRef.current;
       st.scale({ x: eff, y: eff });
-      st.position({ x: panRef.current.x, y: panRef.current.y });
+      // pan + offset de centrado del lienzo en el viewport
+      st.position({
+        x: panRef.current.x + centerOffsetRef.current.x,
+        y: panRef.current.y + centerOffsetRef.current.y,
+      });
       st.batchDraw();
     };
 
@@ -517,6 +555,7 @@ export default function LayerEditor() {
       if (editingRef.current) return;
 
       const oldZoom = zoomRef.current;
+      // zoom hacia el cursor (en cualquier modo)
       const pointer = st.getPointerPosition();
       if (!pointer) return;
 
@@ -532,7 +571,7 @@ export default function LayerEditor() {
       zoomRef.current = newZoom;
 
       const effNew = fitScaleRef.current * newZoom;
-      // reposiciona el pan para que el punto bajo el cursor no se mueva
+      // reposiciona el pan para que el punto de referencia no se mueva
       panRef.current = {
         x: pointer.x - worldX * effNew,
         y: pointer.y - worldY * effNew,
@@ -557,10 +596,11 @@ export default function LayerEditor() {
 
     const onMouseDown = (e: MouseEvent) => {
       const st = stageRef.current;
-      // pan si: boton central, O espacio+izquierdo, O click izquierdo en zona VACIA
-      // (no sobre una capa). Konva nos dice que hay bajo el puntero.
+      const fixed = canvasModeRef.current === "fixed";
+      // en modo fijo, el pan solo con espacio+arrastrar o boton central
+      // (no al clicar en vacio, para no mover sin querer). En libre, tambien en vacio.
       let onEmpty = false;
-      if (st && e.button === 0 && !spacePressedRef.current) {
+      if (!fixed && st && e.button === 0 && !spacePressedRef.current) {
         const target = st.getIntersection(st.getPointerPosition()!);
         // si no hay nodo, o el target es el propio Stage, es zona vacia
         onEmpty = !target || target === st;
@@ -642,7 +682,7 @@ export default function LayerEditor() {
   // Aplica un zoom concreto (desde el slider o botones +/-),
   // manteniendo centrado el punto medio del viewport visible.
   const setZoomCentered = (newZoom: number) => {
-    const ZOOM_MIN = 0.2;
+    const ZOOM_MIN = canvasMode === "fixed" ? 1 : 0.2;
     const ZOOM_MAX = 8;
     newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom));
 
@@ -745,11 +785,22 @@ export default function LayerEditor() {
 
       let cw = canvas.width;
       let ch = canvas.height;
-      if (layers.length === 0) {
+      let scale = 1;
+
+      if (canvasMode === "fixed") {
+        // el lienzo NO cambia. La imagen entra escalada para caber dentro
+        // (como en Canva), dejando un pequeno margen.
+        const margin = 0.92;
+        scale = Math.min((cw * margin) / img.width, (ch * margin) / img.height, 1);
+      } else if (layers.length === 0) {
+        // modo libre: la primera imagen define el lienzo (comportamiento clasico)
         cw = img.width;
         ch = img.height;
         setCanvas({ width: cw, height: ch });
       }
+
+      const drawW = img.width * scale;
+      const drawH = img.height * scale;
 
       const id = `layer-img-${Date.now()}`;
       const name = file.name.replace(/\.[^.]+$/, "");
@@ -763,18 +814,44 @@ export default function LayerEditor() {
         file,
         visible: true,
         opacity: 1,
-        x: Math.max(0, (cw - img.width) / 2),
-        y: Math.max(0, (ch - img.height) / 2),
+        // centrada dentro del lienzo
+        x: Math.max(0, (cw - drawW) / 2),
+        y: Math.max(0, (ch - drawH) / 2),
         rotation: 0,
-        scaleX: 1,
-        scaleY: 1,
+        scaleX: scale,
+        scaleY: scale,
       };
       commit((prev) => [...prev, newLayer]);
       setSelectedId(id);
     } catch (e: any) {
       setError(e.message);
     }
-  }, [canvas.width, canvas.height, layers.length, commit]);
+  }, [canvas.width, canvas.height, layers.length, commit, canvasMode]);
+
+  // Pegar imagen desde el portapapeles del SISTEMA (Ctrl+V), estilo Canva.
+  // Si hay una imagen en el portapapeles, se pega en el lienzo.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      // no interferir si se esta escribiendo en un input/textarea
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            addImage(file); // entra escalada y centrada, como cualquier imagen
+            return;
+          }
+        }
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [addImage]);
 
   const splitByColor = async (layer: EditorLayer) => {
     if (!layer || !layer.file) {
@@ -883,28 +960,6 @@ export default function LayerEditor() {
       next.splice(i + 1, 0, copy); // inserta justo encima del original
       return next;
     });
-    setSelectedId(copy.id);
-  };
-
-  // portapapeles interno (no usa el del sistema, es para capas)
-  const clipboardRef = useRef<EditorLayer | null>(null);
-
-  const copyLayer = (id: string) => {
-    const l = layers.find((x) => x.id === id);
-    if (l) clipboardRef.current = l;
-  };
-
-  const pasteLayer = () => {
-    const src = clipboardRef.current;
-    if (!src) return;
-    const copy: EditorLayer = {
-      ...src,
-      id: `layer-${Date.now()}`,
-      name: `${src.name} copia`,
-      x: (src.x ?? 0) + 16,
-      y: (src.y ?? 0) + 16,
-    };
-    commit((prev) => [...prev, copy]);
     setSelectedId(copy.id);
   };
 
@@ -1041,6 +1096,62 @@ export default function LayerEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing?.id]);
 
+  // cerrar el menu de exportar al hacer clic fuera
+  useEffect(() => {
+    const onOutside = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setExportMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onOutside);
+    return () => document.removeEventListener("mousedown", onOutside);
+  }, []);
+
+  // Exporta el lienzo a PNG, recortado EXACTAMENTE al tamano del lienzo,
+  // a la resolucion elegida (scale: 1x, 2x...). Usa Konva directamente.
+  const exportPng = (scale: number) => {
+    const st = stageRef.current;
+    if (!st) return;
+    setError(null);
+    try {
+      // guardamos transform actual del Stage
+      const prevScale = { x: st.scaleX(), y: st.scaleY() };
+      const prevPos = { x: st.x(), y: st.y() };
+
+      // ocultar los controles de seleccion (Transformer) para que no salgan
+      const transformers = st.find("Transformer");
+      transformers.forEach((tr: any) => tr.hide());
+
+      // ponemos el Stage a escala 1 y sin desplazamiento, para capturar
+      // el lienzo en sus coordenadas reales (0,0 -> canvas.width,height)
+      st.scale({ x: 1, y: 1 });
+      st.position({ x: 0, y: 0 });
+      st.batchDraw();
+
+      const dataUrl = st.toDataURL({
+        x: 0,
+        y: 0,
+        width: canvas.width,
+        height: canvas.height,
+        pixelRatio: scale, // 1x, 2x...
+        mimeType: "image/png",
+      });
+
+      // restauramos los controles y el transform de visualizacion
+      transformers.forEach((tr: any) => tr.show());
+      st.scale(prevScale);
+      st.position(prevPos);
+      st.batchDraw();
+
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = `layerswork-${canvas.width}x${canvas.height}${scale > 1 ? `@${scale}x` : ""}.png`;
+      a.click();
+    } catch (e: any) {
+      setError(`No se pudo exportar PNG: ${e.message}`);
+    }
+  };
+
   const exportPsd = async () => {
     if (layers.length === 0) return;
     setError(null);
@@ -1134,12 +1245,17 @@ export default function LayerEditor() {
     setTimeout(() => URL.revokeObjectURL(url), 100);
   };
 
-  const maxW = 720;
-  const maxH = 540;
-  // scale base: encaja la imagen en el area visible (es el zoom 100% "fit")
-  const fitScale = Math.min(maxW / canvas.width, maxH / canvas.height, 1);
-  // el scale efectivo es el fit * el zoom del usuario
-  const scale = fitScale * zoomRef.current;
+  // area maxima disponible para el viewport
+  const AREA_W = 520;
+  const AREA_H = 400;
+
+  // El viewport (Stage) es un area de trabajo FIJA. El lienzo vive dentro y
+  // crece con el zoom como una unidad (bordes incluidos), estilo Canva.
+  const maxW = AREA_W;
+  const maxH = AREA_H;
+
+  // fitScale: zoom base para que el lienzo entero quepa centrado en el area.
+  const fitScale = Math.min(AREA_W / canvas.width, AREA_H / canvas.height, 1);
 
   const hasContent = layers.length > 0;
   const editingLayer = editing ? layers.find((l) => l.id === editing.id) : null;
@@ -1149,6 +1265,12 @@ export default function LayerEditor() {
   // sincroniza refs espejo (para los listeners nativos de zoom/pan)
   fitScaleRef.current = fitScale;
   editingRef.current = !!editing;
+  canvasModeRef.current = canvasMode;
+  // offset para centrar el lienzo en el area de trabajo (al zoom base)
+  centerOffsetRef.current = {
+    x: (AREA_W - canvas.width * fitScale) / 2,
+    y: (AREA_H - canvas.height * fitScale) / 2,
+  };
 
   // si aun no se ha elegido lienzo (y no viene un proyecto), mostrar la
   // pantalla de nuevo proyecto antes del editor
@@ -1196,20 +1318,56 @@ export default function LayerEditor() {
             <Blend size={15} /> {t("splitColor")}
           </button>
         )}
-        <button
-          className="ed-btn ed-btn-ghost"
-          onClick={exportSvg}
-          disabled={!hasContent}
-        >
-          <FileCode size={15} /> {t("exportSvg")}
-        </button>
-        <button
-          className="ed-btn ed-btn-ghost"
-          onClick={exportPsd}
-          disabled={!hasContent || exporting}
-        >
-          <Download size={15} /> {exporting ? t("exporting") : t("exportPsd")}
-        </button>
+        <div className="ed-export" ref={exportMenuRef}>
+          <button
+            className="ed-btn ed-btn-primary"
+            onClick={() => setExportMenuOpen((v) => !v)}
+            disabled={!hasContent || exporting}
+          >
+            <Download size={15} /> {exporting ? t("exporting") : t("export")}
+            <ChevronDown size={14} />
+          </button>
+          {exportMenuOpen && (
+            <div className="ed-export-menu">
+              <div className="ed-export-section">{t("exportSize")}</div>
+              <div className="ed-export-sizes">
+                {[1, 2, 3].map((sc) => (
+                  <button
+                    key={sc}
+                    className={`ed-export-size ${exportScale === sc ? "ed-export-size-on" : ""}`}
+                    onClick={() => setExportScale(sc)}
+                  >
+                    {sc}x
+                    <small>{canvas.width * sc}x{canvas.height * sc}</small>
+                  </button>
+                ))}
+              </div>
+              <div className="ed-export-section">{t("exportFormat")}</div>
+              <button
+                className="ed-export-item"
+                onClick={() => { exportPng(exportScale); setExportMenuOpen(false); }}
+              >
+                <span>PNG</span>
+                <small>{t("exportPngDesc")}</small>
+              </button>
+              <button
+                className="ed-export-item"
+                onClick={() => { exportSvg(); setExportMenuOpen(false); }}
+              >
+                <span>SVG</span>
+                <small>{t("exportSvgDesc")} ({canvas.width}x{canvas.height})</small>
+              </button>
+              <button
+                className="ed-export-item"
+                onClick={() => { exportPsd(); setExportMenuOpen(false); }}
+                disabled={exporting}
+              >
+                <span>PSD</span>
+                <small>{t("exportPsdDesc")}</small>
+              </button>
+            </div>
+          )}
+        </div>
         <input
           ref={fileRef}
           type="file"
@@ -1244,15 +1402,13 @@ export default function LayerEditor() {
           ) : (
             <>
               <div
-                className="ed-stage-frame"
+                className="ed-stage-frame ed-stage-frame-viewport"
                 style={{ width: maxW, height: maxH, position: "relative" }}
               >
                 <Stage
                   ref={stageRef}
                   width={maxW}
                   height={maxH}
-                  scaleX={scale}
-                  scaleY={scale}
                 >
                   <Layer>
                     {/* lienzo (papel) en modo fijo: fondo blanco del tamano elegido */}
@@ -1264,9 +1420,10 @@ export default function LayerEditor() {
                         height={canvas.height}
                         fill="#ffffff"
                         listening={false}
-                        shadowColor="rgba(0,0,0,0.3)"
-                        shadowBlur={12}
-                        shadowOpacity={0.25}
+                        shadowColor="#000000"
+                        shadowBlur={24}
+                        shadowOpacity={0.45}
+                        cornerRadius={2}
                       />
                     )}
                     {layers.map((l) => (
@@ -1278,6 +1435,7 @@ export default function LayerEditor() {
                         onCommit={commitLayer}
                         onEditText={startEditing}
                         hidden={!!editing && editing.id === l.id}
+                        clampBounds={canvasMode === "fixed" ? { width: canvas.width, height: canvas.height } : null}
                       />
                     ))}
                   </Layer>
@@ -1343,7 +1501,7 @@ export default function LayerEditor() {
                 <input
                   className="ed-zoom-slider"
                   type="range"
-                  min={20}
+                  min={canvasMode === "fixed" ? 100 : 20}
                   max={800}
                   value={zoomLabel}
                   onChange={(e) => setZoomCentered(Number(e.target.value) / 100)}
@@ -1503,17 +1661,17 @@ export default function LayerEditor() {
 const styles = `
   .ed-root { --bg:#15171c; --panel:#1d2027; --line:#2a2e38; --txt:#e6e8ec;
     --muted:#8b90a0; --accent:#4d9d84; --sel:#2a3a35; --danger:#ef7766;
-    display:flex; flex-direction:column; height:100%; min-height:560px;
+    display:flex; flex-direction:column; height:100%; min-height:460px;
     background:var(--bg); color:var(--txt); border-radius:12px; overflow:hidden;
     font-family:'DM Sans',system-ui,sans-serif; border:1px solid var(--line); }
-  .ed-header { display:flex; align-items:center; gap:10px; padding:12px 16px;
+  .ed-header { display:flex; align-items:center; gap:8px; padding:8px 12px;
     border-bottom:1px solid var(--line); background:var(--panel); flex-wrap:wrap; }
   .ed-brand { display:flex; align-items:center; gap:8px; font-weight:600;
     letter-spacing:-.01em; color:var(--accent); margin-right:auto; }
   .ed-brand span { color:var(--txt); }
   .ed-btn { display:inline-flex; align-items:center; gap:7px;
-    background:var(--accent); color:#0c0d10; border:0; padding:8px 14px;
-    border-radius:8px; font-weight:600; font-size:13px; cursor:pointer; }
+    background:var(--accent); color:#0c0d10; border:0; padding:6px 11px;
+    border-radius:7px; font-weight:600; font-size:12px; cursor:pointer; }
   .ed-btn:hover:not(:disabled) { filter:brightness(1.08); }
   .ed-btn:disabled { opacity:.45; cursor:not-allowed; }
   .ed-btn-ghost { background:transparent; color:var(--txt);
@@ -1521,7 +1679,7 @@ const styles = `
   .ed-btn-ghost:hover:not(:disabled) { background:#23262f; filter:none; }
   .ed-icon-btn { display:inline-flex; align-items:center; justify-content:center;
     background:transparent; color:var(--txt); border:0; box-shadow:inset 0 0 0 1px var(--line);
-    width:34px; height:34px; border-radius:8px; cursor:pointer; }
+    width:30px; height:30px; border-radius:7px; cursor:pointer; }
   .ed-icon-btn:hover:not(:disabled) { background:#23262f; }
   .ed-icon-btn:disabled { opacity:.35; cursor:not-allowed; }
   .ed-zoom-btn { background:transparent; color:var(--muted); border:0;
@@ -1538,7 +1696,26 @@ const styles = `
     justify-content:center; }
   .ed-align-btn:hover { background:#23262f; color:var(--accent); }
   .ed-align-sep { width:1px; height:20px; background:var(--line); margin:0 3px; }
-  .ed-zoom-bar { position:absolute; bottom:16px; left:50%; transform:translateX(-50%);
+  .ed-export { position:relative; }
+  .ed-export-menu { position:absolute; top:calc(100% + 6px); right:0; min-width:230px;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:8px; box-shadow:0 8px 24px rgba(0,0,0,.45); z-index:60; }
+  .ed-export-section { font-size:11px; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--muted); font-weight:600; padding:6px 6px 4px; }
+  .ed-export-sizes { display:flex; gap:6px; margin-bottom:6px; }
+  .ed-export-size { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;
+    background:#15171c; border:1px solid var(--line); border-radius:7px; padding:7px 4px;
+    color:var(--txt); cursor:pointer; font-size:13px; font-weight:600; }
+  .ed-export-size small { font-size:10px; color:var(--muted); font-weight:400; font-family:monospace; }
+  .ed-export-size-on { border-color:var(--accent); color:var(--accent); }
+  .ed-export-item { display:flex; flex-direction:column; align-items:flex-start; gap:1px;
+    width:100%; background:transparent; border:0; border-radius:7px; padding:8px 8px;
+    color:var(--txt); cursor:pointer; text-align:left; }
+  .ed-export-item:hover { background:#23262f; }
+  .ed-export-item span { font-size:14px; font-weight:600; }
+  .ed-export-item small { font-size:11px; color:var(--muted); }
+  .ed-export-item:disabled { opacity:.5; cursor:not-allowed; }
+  .ed-zoom-bar { position:absolute; bottom:14px; right:14px;
     display:flex; align-items:center; gap:8px; background:var(--panel);
     border:1px solid var(--line); border-radius:10px; padding:6px 10px;
     box-shadow:0 4px 16px rgba(0,0,0,.35); z-index:5; }
@@ -1555,14 +1732,9 @@ const styles = `
   .ed-zoom-fit:hover { background:#23262f; color:var(--accent); }
   .ed-body { display:flex; flex:1; min-height:0; }
   .ed-canvas-wrap { flex:1; position:relative; display:flex; align-items:center;
-    justify-content:center; padding:24px; background:
-      linear-gradient(45deg,#1a1c22 25%,transparent 25%) -8px 0/16px 16px,
-      linear-gradient(-45deg,#1a1c22 25%,transparent 25%) -8px 0/16px 16px,
-      linear-gradient(45deg,transparent 75%,#1a1c22 75%) -8px 0/16px 16px,
-      linear-gradient(-45deg,transparent 75%,#1a1c22 75%) -8px 0/16px 16px,
-      var(--bg); }
-  .ed-stage-frame { box-shadow:0 0 0 1px var(--line),0 8px 30px rgba(0,0,0,.4);
-    background:#fff; overflow:hidden; position:relative; }
+    justify-content:center; padding:24px; background:var(--bg); overflow:hidden; }
+  .ed-stage-frame { position:relative; }
+  .ed-stage-frame-viewport { background:transparent; overflow:hidden; }
   .ed-text-edit { position:absolute; margin:0; padding:4px; border:1px dashed var(--accent);
     background:rgba(255,255,255,.85); outline:none; resize:none; overflow:hidden;
     font-family:'DM Sans',sans-serif; line-height:1.3; white-space:pre;
@@ -1575,16 +1747,16 @@ const styles = `
   .ed-error-float { position:absolute; bottom:12px; left:50%;
     transform:translateX(-50%); background:#2a1c1e; padding:8px 14px;
     border-radius:8px; font-size:13px; box-shadow:0 0 0 1px var(--danger); }
-  .ed-panel { width:300px; border-left:1px solid var(--line); background:var(--panel);
+  .ed-panel { width:248px; border-left:1px solid var(--line); background:var(--panel);
     display:flex; flex-direction:column; transition:width .15s; }
-  .ed-panel-collapsed { width:120px; }
+  .ed-panel-collapsed { width:100px; }
   .ed-panel-head { display:flex; align-items:center; gap:6px; width:100%;
-    padding:12px 14px; background:transparent; border:0; border-bottom:1px solid var(--line);
-    color:var(--txt); font-weight:600; font-size:13px; cursor:pointer; }
+    padding:9px 12px; background:transparent; border:0; border-bottom:1px solid var(--line);
+    color:var(--txt); font-weight:600; font-size:12px; cursor:pointer; }
   .ed-layer-list { list-style:none; margin:0; padding:6px; overflow-y:auto; flex:1; }
   .ed-layer-none { color:var(--muted); font-size:13px; padding:10px; }
-  .ed-layer { display:flex; align-items:center; gap:6px; padding:8px 9px;
-    border-radius:7px; cursor:pointer; font-size:13px; border:1px solid transparent; }
+  .ed-layer { display:flex; align-items:center; gap:6px; padding:6px 8px;
+    border-radius:6px; cursor:pointer; font-size:12px; border:1px solid transparent; }
   .ed-layer:hover { background:#23262f; }
   .ed-layer-sel { background:var(--sel); box-shadow:inset 0 0 0 1px var(--accent); }
   .ed-layer-over { border-top:2px solid var(--accent); }
@@ -1602,7 +1774,7 @@ const styles = `
     display:flex; padding:2px; border-radius:4px; flex-shrink:0; }
   .ed-icon:hover { color:var(--txt); }
   .ed-icon-del:hover { color:var(--danger); }
-  .ed-props { border-top:1px solid var(--line); padding:12px 14px;
+  .ed-props { border-top:1px solid var(--line); padding:9px 12px;
     display:flex; flex-direction:column; gap:12px; }
   .ed-props-empty { color:var(--muted); font-size:13px; }
   .ed-props-title { display:flex; align-items:center; gap:6px; font-weight:600;

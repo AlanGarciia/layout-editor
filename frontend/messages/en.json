@@ -88,8 +88,13 @@
     "reorder": "Drag to reorder",
     "defaultText": "Type here",
     "textLayer": "Text",
-    "duplicate": "Duplicate"
-    
+    "duplicate": "Duplicate",
+    "export": "Export",
+    "exportSize": "Size",
+    "exportFormat": "Format",
+    "exportPngDesc": "Image with transparency",
+    "exportSvgDesc": "Vector",
+    "exportPsdDesc": "Photoshop with layers"
   },
   "optimizer": {
     "title": "Design Compressor + Optimizer",
